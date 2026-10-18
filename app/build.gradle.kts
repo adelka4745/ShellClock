@@ -13,8 +13,8 @@ android {
         applicationId = "com.sova.shellclock"
         minSdk = 23
         targetSdk = 37
-        versionCode = 5
-        versionName = "2.0"
+        versionCode = 7
+        versionName = "3.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
