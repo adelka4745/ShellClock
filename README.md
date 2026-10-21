@@ -10,7 +10,7 @@
 [![Android](https://img.shields.io/badge/Android-8.0%2B-brightgreen.svg?style=flat-square&logo=android)](https://www.android.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 
-[Скачать APK](https://github.com/adelka4745/ShellClock/releases/latest) • [Сообщить об ошибке](https://github.com/adelka4745/ShellClock/issues) • [Исходный код](https://github.com/adelka4745/ShellClock)
+[Скачать APK](https://github.com/adelka4745/ShellClock/releases/latest) • [Исходный код](https://github.com/adelka4745/ShellClock)
 
 </div>
 
@@ -45,7 +45,7 @@
 
 ## 📸 Скриншоты
 
-*(Здесь вы можете добавить 2-3 красивых скриншота. Чтобы они отображались, загрузите картинки в папку `screenshots` в репозитории и напишите так:)*
+*(Загрузите скриншоты в папку `screenshots` в репозитории, чтобы они отобразились здесь)*
 
 <p align="center">
   <img src="screenshots/clock_screen.png" width="30%" />
@@ -75,6 +75,23 @@
 3. Установите на устройство (разрешите установку из неизвестных источников).
 
 ### Для разработчиков:
-1. Клонируйте репозиторий:
-   ```bash
-   git clone https://github.com/adelka4745/ShellClock.git
+1. Клонируйте репозиторий командой `git clone https://github.com/adelka4745/ShellClock.git`
+2. Откройте проект в **Android Studio (Ladybug или новее)**.
+3. Дождитесь синхронизации Gradle и запустите на эмуляторе/устройстве.
+
+---
+
+## 👨‍💻 Разработка
+
+Проект создан мной при поддержке искусственного интеллекта. Мы стремимся создавать простые, но мощные инструменты для повседневного использования.
+
+---
+
+## 📄 Лицензия
+
+Этот проект распространяется под лицензией **MIT**. Подробности см. в файле [LICENSE](LICENSE).
+
+---
+<div align="center">
+  <i>Сделано с любовью к коду и времени. 🦉</i>
+</div>
