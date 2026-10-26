@@ -1,5 +1,9 @@
 package com.sova.shellclock
 
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -13,6 +17,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -26,12 +31,16 @@ enum class ThemeStyle(val label: String) {
     CLASSIC_DARK("Классическая тёмная"),
     OLED_BLACK("Глубокая чёрная (OLED)"),
     AUTO("Авто (по системе)"),
-    AURORA("Северное сияние (Синяя)"),
-    SUNSET("Закат (Оранжевая)"),
-    NEON("Неон (Фиолетовая)"),
-    FOREST("Лесная (Зелёная)"),
+    AURORA("Северное сияние"),
+    SUNSET("Закат"),
+    NEON("Неон"),
+    FOREST("Лесная"),
     ROSE("Розовая"),
-    MATERIAL_BLUE("Классический синий")
+    MATERIAL_BLUE("Классический синий"),
+    SEA_WAVE("Морская волна"),
+    RETRO("Ретро-неон"),
+    COSMOS("Космос"),
+    MATERIAL_LIGHT("Material Light")
 }
 
 enum class SortType(val label: String) {
@@ -44,9 +53,12 @@ enum class SortType(val label: String) {
 data class AppSettings(
     val themeStyle: ThemeStyle = ThemeStyle.CLASSIC_DARK,
     val sizeMultiplier: Float = 1.0f,
-    val timeFormat: Int = 24, // 24 или 12 часов
+    val timeFormat: Int = 24,
     val showSeconds: Boolean = true,
-    val sortType: SortType = SortType.BY_NAME
+    val sortType: SortType = SortType.BY_NAME,
+    val animationsEnabled: Boolean = true,
+    val showDateUnderClock: Boolean = false,
+    val hideEmptyRegions: Boolean = true
 ) {
     companion object {
         val DEFAULT = AppSettings()
@@ -68,18 +80,66 @@ fun SettingsScreen(
 ) {
     val safe = remember(settings) { settings.normalized() }
     val scale = safe.sizeMultiplier
+    val context = LocalContext.current
 
     var tabIndex by rememberSaveable { mutableIntStateOf(0) }
     var showResetAllDialog by remember { mutableStateOf(false) }
+    var showImportError by remember { mutableStateOf(false) }
 
     fun update(transform: (AppSettings) -> AppSettings) {
         onSettingsChange(transform(safe).normalized())
     }
 
+    // --- Лаунчер ЭКСПОРТА ---
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri: Uri? ->
+        uri?.let {
+            try {
+                val alarmsText = AlarmStorage.serialize(AlarmStorage.loadAlarms(context))
+                val settingsText = SettingsSerializer.serialize(safe)
+                val fullData = "[SETTINGS]\n$settingsText\n[ALARMS]\n$alarmsText"
+                context.contentResolver.openOutputStream(it)?.use { stream ->
+                    stream.write(fullData.toByteArray())
+                }
+            } catch (e: Exception) { }
+        }
+    }
+
+    // --- Лаунчер ИМПОРТА ---
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            try {
+                val fullData = context.contentResolver.openInputStream(it)?.bufferedReader()?.use { reader ->
+                    reader.readText()
+                } ?: ""
+                val parts = fullData.split("[ALARMS]")
+                val settingsPart = parts[0].replace("[SETTINGS]\n", "")
+                val alarmsPart = if (parts.size > 1) parts[1] else ""
+
+                SettingsSerializer.deserialize(settingsPart)?.let { importedSettings ->
+                    onSettingsChange(importedSettings)
+                }
+
+                val importedAlarms = AlarmStorage.deserialize(alarmsPart)
+                if (importedAlarms.isNotEmpty()) {
+                    val currentAlarms = AlarmStorage.loadAlarms(context)
+                    val merged = (currentAlarms + importedAlarms).distinctBy { it.id }
+                    AlarmStorage.saveAlarms(context, merged)
+                }
+            } catch (e: Exception) {
+                showImportError = true
+            }
+        }
+    }
+
     val tabs = listOf(
-        SettingsTab("Внешний вид", Icons.Default.Palette),
+        SettingsTab("Вид", Icons.Default.Palette),
         SettingsTab("Время", Icons.Default.Schedule),
-        SettingsTab("Города", Icons.Default.Public)
+        SettingsTab("Города", Icons.Default.Public),
+        SettingsTab("Данные", Icons.Default.Storage)
     )
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -110,6 +170,16 @@ fun SettingsScreen(
                 0 -> AppearanceTab(safe, scale, ::update)
                 1 -> TimeTab(safe, scale, ::update)
                 2 -> CitiesTab(safe, scale, ::update, onResetAll = { showResetAllDialog = true })
+                3 -> DataTab(
+                    scale = scale,
+                    appVersion = BuildConfig.VERSION_NAME,
+                    onExport = { exportLauncher.launch("my_backup.scs") },
+                    onImport = { importLauncher.launch(arrayOf("text/plain", "*/*")) },
+                    onOpenLicense = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/adelka4745/ShellClock/blob/master/LICENSE"))
+                        context.startActivity(intent)
+                    }
+                )
             }
         }
     }
@@ -129,6 +199,15 @@ fun SettingsScreen(
                     Text("Отмена", fontSize = (15 * scale).sp)
                 }
             }
+        )
+    }
+
+    if (showImportError) {
+        AlertDialog(
+            onDismissRequest = { showImportError = false },
+            title = { Text("Ошибка", fontSize = (20 * scale).sp) },
+            text = { Text("Не удалось прочитать файл.", fontSize = (15 * scale).sp) },
+            confirmButton = { TextButton(onClick = { showImportError = false }) { Text("ОК", fontSize = (15 * scale).sp) } }
         )
     }
 }
@@ -153,6 +232,13 @@ private fun AppearanceTab(settings: AppSettings, scale: Float, update: ((AppSett
                 modifier = Modifier.fillMaxWidth()
             )
         }
+
+        item { SectionHeader("Дополнительно", scale) }
+        item {
+            SwitchRow("Анимации", "Плавные переходы", settings.animationsEnabled, scale) { v ->
+                update { it.copy(animationsEnabled = v) }
+            }
+        }
     }
 }
 
@@ -174,9 +260,15 @@ private fun TimeTab(settings: AppSettings, scale: Float, update: ((AppSettings) 
             }
         }
 
+        item { SectionHeader("Элементы", scale) }
         item {
-            SwitchRow("Показывать секунды", "Обновление каждую секунду", settings.showSeconds, scale) { v ->
+            SwitchRow("Секунды", "Показывать секунды", settings.showSeconds, scale) { v ->
                 update { it.copy(showSeconds = v) }
+            }
+        }
+        item {
+            SwitchRow("Дата под часами", "Показывать дату", settings.showDateUnderClock, scale) { v ->
+                update { it.copy(showDateUnderClock = v) }
             }
         }
     }
@@ -190,6 +282,13 @@ private fun CitiesTab(settings: AppSettings, scale: Float, onUpdate: ((AppSettin
             RadioRow(settings.sortType == s, s.label, scale) { onUpdate { it.copy(sortType = s) } }
         }
 
+        item { SectionHeader("Отображение", scale) }
+        item {
+            SwitchRow("Скрывать пустые регионы", "Не показывать вкладки", settings.hideEmptyRegions, scale) { v ->
+                onUpdate { it.copy(hideEmptyRegions = v) }
+            }
+        }
+
         item { SectionHeader("Сброс", scale) }
         item {
             Button(
@@ -198,6 +297,42 @@ private fun CitiesTab(settings: AppSettings, scale: Float, onUpdate: ((AppSettin
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
             ) {
                 Text("Сбросить все настройки", fontSize = (16 * scale).sp, color = MaterialTheme.colorScheme.onErrorContainer)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DataTab(
+    scale: Float, appVersion: String,
+    onExport: () -> Unit, onImport: () -> Unit, onOpenLicense: () -> Unit
+) {
+    SettingsLazyList(scale) {
+        item { SectionHeader("Резервная копия (.scs)", scale) }
+        item {
+            Text("Сохраните настройки и будильники.", fontSize = (12 * scale).sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(onClick = onExport, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Экспорт", fontSize = (14 * scale).sp)
+                }
+                Button(onClick = onImport, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Импорт", fontSize = (14 * scale).sp)
+                }
+            }
+        }
+
+        item { SectionHeader("О приложении", scale) }
+        item { Text("Версия: $appVersion", fontSize = (14 * scale).sp) }
+        item {
+            TextButton(onClick = onOpenLicense, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Info, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Лицензия (LICENSE)", fontSize = (15 * scale).sp)
             }
         }
     }
@@ -259,6 +394,46 @@ private fun TimePreviewCard(settings: AppSettings, scale: Float) {
     Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(timeText, fontSize = (28 * scale).sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            if (settings.showDateUnderClock) {
+                Text("21 окт 2026", fontSize = (14 * scale).sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
+    }
+}
+
+// ── Сериализация настроек ──────────────────────────────────────
+object SettingsSerializer {
+    fun serialize(s: AppSettings): String = buildString {
+        append("theme=${s.themeStyle.name};")
+        append("size=${s.sizeMultiplier};")
+        append("timeFmt=${s.timeFormat};")
+        append("seconds=${s.showSeconds};")
+        append("sort=${s.sortType.name};")
+        append("anim=${s.animationsEnabled};")
+        append("date=${s.showDateUnderClock};")
+        append("hideEmpty=${s.hideEmptyRegions}")
+    }
+
+    fun deserialize(text: String): AppSettings? {
+        if (!text.contains('=')) return null
+        val map = text.split(';').mapNotNull { part ->
+            val idx = part.indexOf('=')
+            if (idx <= 0) null else part.substring(0, idx) to part.substring(idx + 1)
+        }.toMap()
+
+        fun <T : Enum<T>> enumOr(key: String, values: Array<T>, default: T): T = map[key]?.let { name -> values.firstOrNull { it.name == name } } ?: default
+
+        return try {
+            AppSettings(
+                themeStyle = enumOr("theme", ThemeStyle.entries.toTypedArray(), AppSettings.DEFAULT.themeStyle),
+                sizeMultiplier = AppSettings.clampSize(map["size"]?.toFloatOrNull() ?: 1f),
+                timeFormat = map["timeFmt"]?.toIntOrNull() ?: 24,
+                showSeconds = map["seconds"]?.toBooleanStrictOrNull() ?: true,
+                sortType = enumOr("sort", SortType.entries.toTypedArray(), AppSettings.DEFAULT.sortType),
+                animationsEnabled = map["anim"]?.toBooleanStrictOrNull() ?: true,
+                showDateUnderClock = map["date"]?.toBooleanStrictOrNull() ?: false,
+                hideEmptyRegions = map["hideEmpty"]?.toBooleanStrictOrNull() ?: true
+            ).normalized()
+        } catch (_: Exception) { null }
     }
 }

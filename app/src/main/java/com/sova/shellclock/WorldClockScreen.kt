@@ -15,7 +15,6 @@ import java.util.*
 
 /**
  * Модель города для мирового времени.
- * Обязательно должна быть объявлена — иначе файл не компилируется.
  */
 data class CityTime(
     val name: String,
@@ -27,7 +26,9 @@ data class CityTime(
 fun WorldClockScreen(
     showSeconds: Boolean,
     use24HourFormat: Boolean,
-    sortType: Int
+    sortType: Int,
+    hideEmptyRegions: Boolean = true, // Новый параметр из настроек
+    modifier: Modifier = Modifier
 ) {
     val cities = remember {
         listOf(
@@ -70,9 +71,7 @@ fun WorldClockScreen(
             CityTime("Владивосток", "Asia/Vladivostok", "Азия"),
             CityTime("Новосибирск", "Asia/Novosibirsk", "Азия"),
             CityTime("Иерусалим", "Asia/Jerusalem", "Азия"),
-            // Исправлено: Asia/Abu_Dhabi не существует → Asia/Dubai
             CityTime("Абу-Даби", "Asia/Dubai", "Азия"),
-            // Исправлено: для Астаны используем Asia/Qostanay (UTC+5, как и Алматы, но отдельный ID)
             CityTime("Астана", "Asia/Qostanay", "Азия"),
             CityTime("Баку", "Asia/Baku", "Азия"),
             CityTime("Багдад", "Asia/Baghdad", "Азия"),
@@ -103,7 +102,6 @@ fun WorldClockScreen(
             CityTime("Рио-де-Жанейро", "America/Sao_Paulo", "Америка"),
             CityTime("Буэнос-Айрес", "America/Argentina/Buenos_Aires", "Америка"),
             CityTime("Сантьяго", "America/Santiago", "Америка"),
-            // Исправлено: опечатка «Анкордиж» → «Анкоридж»
             CityTime("Анкоридж", "America/Anchorage", "Америка"),
             CityTime("Богота", "America/Bogota", "Америка"),
             CityTime("Бостон", "America/New_York", "Америка"),
@@ -142,7 +140,6 @@ fun WorldClockScreen(
             CityTime("Мельбурн", "Australia/Melbourne", "Австралия и Океания"),
             CityTime("Перт", "Australia/Perth", "Австралия и Океания"),
             CityTime("Окленд", "Pacific/Auckland", "Австралия и Океания"),
-            // Исправлено: «Фиджи» — не город, используем столицу Сува
             CityTime("Сува", "Pacific/Fiji", "Австралия и Океания"),
             CityTime("Брисбен", "Australia/Brisbane", "Австралия и Океания"),
             CityTime("Аделаида", "Australia/Adelaide", "Австралия и Океания"),
@@ -150,10 +147,23 @@ fun WorldClockScreen(
         )
     }
 
-    val regions = remember { cities.map { it.region }.distinct() }
+    // Вычисляем список регионов (с учетом скрытия пустых, если нужно)
+    val regions = remember(cities, hideEmptyRegions) {
+        val allRegions = cities.map { it.region }.distinct()
+        if (hideEmptyRegions) {
+            allRegions.filter { region -> cities.any { it.region == region } }
+        } else {
+            allRegions
+        }
+    }
+
     var selectedTabIndex by remember { mutableIntStateOf(0) }
 
-    // Обновляем текущее время; период зависит от того, показываем ли секунды
+    // Защита от выхода за границы, если список регионов изменился
+    if (selectedTabIndex >= regions.size && regions.isNotEmpty()) {
+        selectedTabIndex = 0
+    }
+
     var currentTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(showSeconds) {
         while (true) {
@@ -169,10 +179,8 @@ fun WorldClockScreen(
         else -> "hh:mm a"
     }
 
-    // Локаль для AM/PM: для 12-часового формата фиксируем US, чтобы не было «ДП/ПП»
     val timeLocale = if (use24HourFormat) Locale.getDefault() else Locale.US
 
-    // Защита от пустого списка регионов + сортировка по смещению UTC при sortType != 0
     val filteredCities = remember(selectedTabIndex, sortType, regions, currentTime) {
         if (regions.isEmpty() || selectedTabIndex !in regions.indices) {
             emptyList()
@@ -188,7 +196,7 @@ fun WorldClockScreen(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = modifier.fillMaxSize()) {
         Text(
             text = "Мировое время",
             fontSize = 24.sp,
@@ -196,17 +204,19 @@ fun WorldClockScreen(
             modifier = Modifier.padding(16.dp)
         )
 
-        ScrollableTabRow(
-            selectedTabIndex = selectedTabIndex,
-            edgePadding = 16.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            regions.forEachIndexed { index, region ->
-                Tab(
-                    selected = selectedTabIndex == index,
-                    onClick = { selectedTabIndex = index },
-                    text = { Text(text = region, fontSize = 16.sp) }
-                )
+        if (regions.isNotEmpty()) {
+            ScrollableTabRow(
+                selectedTabIndex = selectedTabIndex,
+                edgePadding = 16.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                regions.forEachIndexed { index, region ->
+                    Tab(
+                        selected = selectedTabIndex == index,
+                        onClick = { selectedTabIndex = index },
+                        text = { Text(text = region, fontSize = 16.sp) }
+                    )
+                }
             }
         }
 
@@ -233,13 +243,6 @@ fun WorldClockScreen(
                     )
                 }
                 HorizontalDivider()
-            }
-
-            item {
-                Column(modifier = Modifier.padding(top = 16.dp, bottom = 24.dp)) {
-                    Text(text = "Скоро будет ещё больше!", fontSize = 20.sp)
-                    Text(text = "Планируется добавить больше городов", fontSize = 16.sp)
-                }
             }
         }
     }

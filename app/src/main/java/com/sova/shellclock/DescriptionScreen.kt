@@ -1,13 +1,18 @@
 package com.sova.shellclock
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -15,7 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -24,12 +29,11 @@ import org.json.JSONArray
 import java.net.HttpURLConnection
 import java.net.URL
 
-// Модель для хранения данных о релизе
 data class GitHubRelease(
-    val name: String, // Например, "ShellClock 3.1"
-    val tagName: String, // Например, "v3.1"
-    val htmlUrl: String, // Ссылка на страницу релиза
-    val publishedAt: String // Дата публикации
+    val name: String,
+    val tagName: String,
+    val htmlUrl: String,
+    val publishedAt: String
 )
 
 @Composable
@@ -40,7 +44,42 @@ fun DescriptionScreen(sizeMultiplier: Float) {
     var error by remember { mutableStateOf<String?>(null) }
     val repoUrl = "https://github.com/adelka4745/ShellClock"
 
-    // Функция для загрузки релизов с GitHub
+    // Состояние для встроенного браузера
+    var showEmbeddedBrowser by remember { mutableStateOf(false) }
+    var embeddedUrl by remember { mutableStateOf("") }
+
+    // --- ЛОГИКА ПАСХАЛКИ ---
+    var clickCount by remember { mutableIntStateOf(0) }
+    var lastClickTime by remember { mutableLongStateOf(0L) }
+
+    fun handleEasterEggClick() {
+        val currentTime = System.currentTimeMillis()
+        // Если между кликами прошло больше 1.5 секунд, сбрасываем счетчик
+        if (currentTime - lastClickTime > 1500) {
+            clickCount = 0
+        }
+        clickCount++
+        lastClickTime = currentTime
+
+        if (clickCount == 7) {
+            // БАМ! Пасхалка сработала — открываем Google
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com"))
+            context.startActivity(intent)
+            clickCount = 0 // Сбрасываем
+        }
+    }
+    // ------------------------
+
+    // Если открыт встроенный браузер, показываем его
+    if (showEmbeddedBrowser) {
+        EmbeddedWebView(
+            url = embeddedUrl,
+            onClose = { showEmbeddedBrowser = false }
+        )
+        return
+    }
+
+    // Загрузка релизов
     suspend fun fetchReleases() {
         try {
             withContext(Dispatchers.IO) {
@@ -59,14 +98,12 @@ fun DescriptionScreen(sizeMultiplier: Float) {
                     for (i in 0 until jsonArray.length()) {
                         val obj = jsonArray.getJSONObject(i)
                         val name = obj.optString("name", obj.optString("tag_name"))
-                        // Фильтруем только те, что содержат "ShellClock" или просто берем все релизы
-                        // Если хотите строго "ShellClock 3.1", можно добавить проверку name.startsWith("ShellClock")
                         fetchedReleases.add(
                             GitHubRelease(
                                 name = name.ifBlank { obj.getString("tag_name") },
                                 tagName = obj.getString("tag_name"),
                                 htmlUrl = obj.getString("html_url"),
-                                publishedAt = obj.getString("published_at").take(10) // Берем только дату
+                                publishedAt = obj.getString("published_at").take(10)
                             )
                         )
                     }
@@ -89,24 +126,22 @@ fun DescriptionScreen(sizeMultiplier: Float) {
         }
     }
 
-    // Загружаем данные при первом запуске
     LaunchedEffect(Unit) {
         fetchReleases()
     }
 
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(top = 40.dp, start = 16.dp, end = 16.dp, bottom = 16.dp),
+        modifier = Modifier.fillMaxSize().padding(top = 40.dp, start = 16.dp, end = 16.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Заголовок и описание
         item {
+            // Заголовок с пасхалкой
             Text(
                 text = "ShellClock",
                 fontSize = (32 * sizeMultiplier).sp,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.clickable { handleEasterEggClick() }
             )
         }
         item {
@@ -117,38 +152,20 @@ fun DescriptionScreen(sizeMultiplier: Float) {
             )
         }
         item {
-            Text(
-                text = "Часы — часы из вашего часового пояса",
-                fontSize = (16 * sizeMultiplier).sp,
-                color = MaterialTheme.colorScheme.onBackground
-            )
+            Text("Часы — часы из вашего часового пояса", fontSize = (16 * sizeMultiplier).sp)
         }
         item {
-            Text(
-                text = "Мир — часы из других часовых поясов",
-                fontSize = (16 * sizeMultiplier).sp,
-                color = MaterialTheme.colorScheme.onBackground
-            )
+            Text("Мир — часы из других часовых поясов", fontSize = (16 * sizeMultiplier).sp)
         }
         item {
-            Text(
-                text = "Секундомер — засечь время, например, скорость бега",
-                fontSize = (16 * sizeMultiplier).sp,
-                color = MaterialTheme.colorScheme.onBackground
-            )
+            Text("Секундомер — засечь время, например, скорость бега", fontSize = (16 * sizeMultiplier).sp)
         }
         item {
-            Text(
-                text = "Таймер — идеально на ночь. Имеет звуки будильника системы.",
-                fontSize = (16 * sizeMultiplier).sp,
-                color = MaterialTheme.colorScheme.onBackground
-            )
+            Text("Таймер — идеально на ночь. Имеет звуки будильника системы.", fontSize = (16 * sizeMultiplier).sp)
         }
 
-        // Разделитель
         item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp)) }
 
-        // Секция с версиями
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -161,24 +178,12 @@ fun DescriptionScreen(sizeMultiplier: Float) {
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
                 )
-                // Кнопка обновления списка
-                IconButton(onClick = {
-                    isLoading = true
-                    error = null
-                    // Перезапускаем загрузку
-                    // В Compose для этого можно использовать ключ в LaunchedEffect, но проще вызвать корутину заново
-                    // Для простоты здесь просто дернем рекомпозицию (в реальном проекте лучше использовать ViewModel)
-                }) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Обновить",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
+                IconButton(onClick = { isLoading = true; error = null }) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Обновить", tint = MaterialTheme.colorScheme.primary)
                 }
             }
         }
 
-        // Индикатор загрузки
         if (isLoading) {
             item {
                 Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
@@ -187,59 +192,32 @@ fun DescriptionScreen(sizeMultiplier: Float) {
             }
         }
 
-        // Ошибка
         if (error != null) {
             item {
-                Text(
-                    text = error!!,
-                    color = MaterialTheme.colorScheme.error,
-                    fontSize = (14 * sizeMultiplier).sp
-                )
+                Text(text = error!!, color = MaterialTheme.colorScheme.error, fontSize = (14 * sizeMultiplier).sp)
             }
         }
 
-        // Список версий
+        // Карточки версий (открывают встроенный браузер)
         items(releases) { release ->
             Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        // Открываем ссылку на релиз в браузере
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(release.htmlUrl))
-                        context.startActivity(intent)
-                    },
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
+                modifier = Modifier.fillMaxWidth().clickable {
+                    embeddedUrl = release.htmlUrl
+                    showEmbeddedBrowser = true
+                },
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = release.name,
-                            fontSize = (16 * sizeMultiplier).sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "Опубликовано: ${release.publishedAt}",
-                            fontSize = (12 * sizeMultiplier).sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
+                        Text(release.name, fontSize = (16 * sizeMultiplier).sp, fontWeight = FontWeight.Medium)
+                        Text("Опубликовано: ${release.publishedAt}", fontSize = (12 * sizeMultiplier).sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
                     }
-                    Icon(
-                        imageVector = Icons.Default.OpenInNew,
-                        contentDescription = "Открыть",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size((20 * sizeMultiplier).dp)
-                    )
+                    Icon(Icons.Default.OpenInBrowser, contentDescription = "Открыть", tint = MaterialTheme.colorScheme.primary)
                 }
             }
         }
 
-        // Кнопка перехода на сам проект
+        // Кнопка (открывает дефолтный браузер)
         item {
             Spacer(modifier = Modifier.height(16.dp))
             Button(
@@ -248,22 +226,44 @@ fun DescriptionScreen(sizeMultiplier: Float) {
                     context.startActivity(intent)
                 },
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
             ) {
-                Icon(
-                    imageVector = Icons.Default.OpenInNew,
-                    contentDescription = null,
-                    modifier = Modifier.size((20 * sizeMultiplier).dp)
-                )
+                Icon(Icons.Default.OpenInBrowser, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Перейти на GitHub проекта",
-                    fontSize = (16 * sizeMultiplier).sp,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+                Text("Перейти на GitHub", fontSize = (16 * sizeMultiplier).sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
             }
         }
+    }
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+fun EmbeddedWebView(url: String, onClose: () -> Unit) {
+    BackHandler {
+        onClose()
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onClose) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
+            }
+            Text("Просмотр релиза", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        }
+
+        AndroidView(
+            factory = { context ->
+                WebView(context).apply {
+                    webViewClient = WebViewClient()
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    loadUrl(url)
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }
