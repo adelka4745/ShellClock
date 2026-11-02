@@ -1,11 +1,17 @@
 package com.sova.shellclock
 
+import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -13,26 +19,23 @@ import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.*
 
-/**
- * Модель города для мирового времени.
- */
-data class CityTime(
-    val name: String,
-    val timezone: String,
-    val region: String
-)
+data class CityTime(val name: String, val timezone: String, val region: String)
 
 @Composable
 fun WorldClockScreen(
     showSeconds: Boolean,
     use24HourFormat: Boolean,
     sortType: Int,
-    hideEmptyRegions: Boolean = true, // Новый параметр из настроек
+    hideEmptyRegions: Boolean = true,
+    showTimezoneName: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("shellclock_prefs", Context.MODE_PRIVATE) }
+
     val cities = remember {
         listOf(
-            // ── Европа ──────────────────────────────────────────────
+            // Европа
             CityTime("Лондон", "Europe/London", "Европа"),
             CityTime("Париж", "Europe/Paris", "Европа"),
             CityTime("Берлин", "Europe/Berlin", "Европа"),
@@ -56,7 +59,7 @@ fun WorldClockScreen(
             CityTime("Хельсинки", "Europe/Helsinki", "Европа"),
             CityTime("Дублин", "Europe/Dublin", "Европа"),
 
-            // ── Азия ────────────────────────────────────────────────
+            // Азия
             CityTime("Дубай", "Asia/Dubai", "Азия"),
             CityTime("Екатеринбург", "Asia/Yekaterinburg", "Азия"),
             CityTime("Ташкент", "Asia/Tashkent", "Азия"),
@@ -90,7 +93,7 @@ fun WorldClockScreen(
             CityTime("Иркутск", "Asia/Irkutsk", "Азия"),
             CityTime("Эр-Рияд", "Asia/Riyadh", "Азия"),
 
-            // ── Америка ─────────────────────────────────────────────
+            // Америка
             CityTime("Гонолулу", "Pacific/Honolulu", "Америка"),
             CityTime("Лос-Анджелес", "America/Los_Angeles", "Америка"),
             CityTime("Денвер", "America/Denver", "Америка"),
@@ -118,7 +121,7 @@ fun WorldClockScreen(
             CityTime("Филадельфия", "America/New_York", "Америка"),
             CityTime("Хьюстон", "America/Chicago", "Америка"),
 
-            // ── Африка ──────────────────────────────────────────────
+            // Африка
             CityTime("Каир", "Africa/Cairo", "Африка"),
             CityTime("Йоханнесбург", "Africa/Johannesburg", "Африка"),
             CityTime("Найроби", "Africa/Nairobi", "Африка"),
@@ -135,7 +138,7 @@ fun WorldClockScreen(
             CityTime("Тунис", "Africa/Tunis", "Африка"),
             CityTime("Хартум", "Africa/Khartoum", "Африка"),
 
-            // ── Австралия и Океания ────────────────────────────────
+            // Австралия и Океания
             CityTime("Сидней", "Australia/Sydney", "Австралия и Океания"),
             CityTime("Мельбурн", "Australia/Melbourne", "Австралия и Океания"),
             CityTime("Перт", "Australia/Perth", "Австралия и Океания"),
@@ -147,24 +150,18 @@ fun WorldClockScreen(
         )
     }
 
-    // Вычисляем список регионов (с учетом скрытия пустых, если нужно)
-    val regions = remember(cities, hideEmptyRegions) {
-        val allRegions = cities.map { it.region }.distinct()
-        if (hideEmptyRegions) {
-            allRegions.filter { region -> cities.any { it.region == region } }
-        } else {
-            allRegions
-        }
+    var favorites by remember { mutableStateOf(prefs.getStringSet("favorites", emptySet())?.toSet() ?: emptySet()) }
+
+    fun toggleFavorite(cityName: String) {
+        val newFavs = if (favorites.contains(cityName)) favorites - cityName else favorites + cityName
+        favorites = newFavs
+        prefs.edit().putStringSet("favorites", newFavs).apply()
     }
 
+    val regions = remember { cities.map { it.region }.distinct() }
     var selectedTabIndex by remember { mutableIntStateOf(0) }
-
-    // Защита от выхода за границы, если список регионов изменился
-    if (selectedTabIndex >= regions.size && regions.isNotEmpty()) {
-        selectedTabIndex = 0
-    }
-
     var currentTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
     LaunchedEffect(showSeconds) {
         while (true) {
             currentTime = System.currentTimeMillis()
@@ -172,13 +169,7 @@ fun WorldClockScreen(
         }
     }
 
-    val timePattern = when {
-        use24HourFormat && showSeconds -> "HH:mm:ss"
-        use24HourFormat && !showSeconds -> "HH:mm"
-        !use24HourFormat && showSeconds -> "hh:mm:ss a"
-        else -> "hh:mm a"
-    }
-
+    val timePattern = if (use24HourFormat) "HH:mm" else "hh:mm a"
     val timeLocale = if (use24HourFormat) Locale.getDefault() else Locale.US
 
     val filteredCities = remember(selectedTabIndex, sortType, regions, currentTime) {
@@ -186,61 +177,56 @@ fun WorldClockScreen(
             emptyList()
         } else {
             val regionCities = cities.filter { it.region == regions[selectedTabIndex] }
-            if (sortType == 0) {
-                regionCities.sortedBy { it.name }
-            } else {
-                regionCities.sortedBy {
-                    TimeZone.getTimeZone(it.timezone).getOffset(currentTime)
-                }
+            when (sortType) {
+                0 -> regionCities.sortedBy { it.name }
+                1 -> regionCities.sortedBy { it.timezone }
+                2 -> regionCities.sortedBy { TimeZone.getTimeZone(it.timezone).getOffset(currentTime) }
+                else -> regionCities
             }
         }
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        Text(
-            text = "Мировое время",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(16.dp)
-        )
+        Text("Мировое время", fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(16.dp))
 
-        if (regions.isNotEmpty()) {
-            ScrollableTabRow(
-                selectedTabIndex = selectedTabIndex,
-                edgePadding = 16.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                regions.forEachIndexed { index, region ->
-                    Tab(
-                        selected = selectedTabIndex == index,
-                        onClick = { selectedTabIndex = index },
-                        text = { Text(text = region, fontSize = 16.sp) }
-                    )
-                }
+        ScrollableTabRow(selectedTabIndex = selectedTabIndex, edgePadding = 16.dp) {
+            regions.forEachIndexed { index, region ->
+                Tab(
+                    selected = selectedTabIndex == index,
+                    onClick = { selectedTabIndex = index },
+                    text = { Text(region) }
+                )
             }
         }
 
         LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-            item { Spacer(modifier = Modifier.height(8.dp)) }
-
             items(filteredCities) { city ->
-                val sdf = remember(timePattern, city.timezone, timeLocale) {
+                val sdf = remember(timePattern, city.timezone) {
                     SimpleDateFormat(timePattern, timeLocale).apply {
                         timeZone = TimeZone.getTimeZone(city.timezone)
                     }
                 }
+                val isFav = favorites.contains(city.name)
 
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(city.name, fontSize = 20.sp)
-                    Text(
-                        text = sdf.format(Date(currentTime)),
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    IconButton(onClick = { toggleFavorite(city.name) }) {
+                        Icon(
+                            imageVector = if (isFav) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                            contentDescription = "В избранное",
+                            tint = if (isFav) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(city.name, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                        if (showTimezoneName) {
+                            Text(city.timezone, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Text(sdf.format(Date(currentTime)), fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
+                    }
                 }
                 HorizontalDivider()
             }

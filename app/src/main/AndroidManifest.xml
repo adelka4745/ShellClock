@@ -27,7 +27,11 @@
         </activity>
 
         <receiver android:name=".AlarmReceiver" />
+
         <service android:name=".AlarmService"
+            android:foregroundServiceType="specialUse" />
+
+        <service android:name=".TimerForeground"
             android:foregroundServiceType="specialUse" />
 
     </application>

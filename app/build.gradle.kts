@@ -11,10 +11,10 @@ android {
 
     defaultConfig {
         applicationId = "com.sova.shellclock"
-        minSdk = 23
+        minSdk = 26
         targetSdk = 37
-        versionCode = 10
-        versionName = "4.0"
+        versionCode = 11
+        versionName = "4.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -53,4 +53,5 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    implementation("androidx.glance:glance-appwidget:1.1.0")
 }

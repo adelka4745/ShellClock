@@ -25,7 +25,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// ── Перечисления ───────────────────────────────────────────────
 enum class ThemeStyle(val label: String) {
     LIGHT("Светлая"),
     CLASSIC_DARK("Классическая тёмная"),
@@ -49,16 +48,15 @@ enum class SortType(val label: String) {
     BY_UTC_OFFSET("По смещению UTC")
 }
 
-// ── Модель настроек ────────────────────────────────────────────
 data class AppSettings(
     val themeStyle: ThemeStyle = ThemeStyle.CLASSIC_DARK,
     val sizeMultiplier: Float = 1.0f,
     val timeFormat: Int = 24,
     val showSeconds: Boolean = true,
     val sortType: SortType = SortType.BY_NAME,
-    val animationsEnabled: Boolean = true,
     val showDateUnderClock: Boolean = false,
-    val hideEmptyRegions: Boolean = true
+    val hideEmptyRegions: Boolean = true,
+    val showTimezoneName: Boolean = false
 ) {
     companion object {
         val DEFAULT = AppSettings()
@@ -71,7 +69,6 @@ data class AppSettings(
     fun normalized(): AppSettings = copy(sizeMultiplier = clampSize(sizeMultiplier))
 }
 
-// ── Главный экран настроек ─────────────────────────────────────
 @Composable
 fun SettingsScreen(
     settings: AppSettings,
@@ -90,23 +87,21 @@ fun SettingsScreen(
         onSettingsChange(transform(safe).normalized())
     }
 
-    // --- Лаунчер ЭКСПОРТА ---
+    // Экспорт настроек в .scs файл
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/plain")
     ) { uri: Uri? ->
         uri?.let {
             try {
-                val alarmsText = AlarmStorage.serialize(AlarmStorage.loadAlarms(context))
                 val settingsText = SettingsSerializer.serialize(safe)
-                val fullData = "[SETTINGS]\n$settingsText\n[ALARMS]\n$alarmsText"
                 context.contentResolver.openOutputStream(it)?.use { stream ->
-                    stream.write(fullData.toByteArray())
+                    stream.write(settingsText.toByteArray())
                 }
             } catch (e: Exception) { }
         }
     }
 
-    // --- Лаунчер ИМПОРТА ---
+    // Импорт настроек из .scs файла
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -115,19 +110,8 @@ fun SettingsScreen(
                 val fullData = context.contentResolver.openInputStream(it)?.bufferedReader()?.use { reader ->
                     reader.readText()
                 } ?: ""
-                val parts = fullData.split("[ALARMS]")
-                val settingsPart = parts[0].replace("[SETTINGS]\n", "")
-                val alarmsPart = if (parts.size > 1) parts[1] else ""
-
-                SettingsSerializer.deserialize(settingsPart)?.let { importedSettings ->
+                SettingsSerializer.deserialize(fullData)?.let { importedSettings ->
                     onSettingsChange(importedSettings)
-                }
-
-                val importedAlarms = AlarmStorage.deserialize(alarmsPart)
-                if (importedAlarms.isNotEmpty()) {
-                    val currentAlarms = AlarmStorage.loadAlarms(context)
-                    val merged = (currentAlarms + importedAlarms).distinctBy { it.id }
-                    AlarmStorage.saveAlarms(context, merged)
                 }
             } catch (e: Exception) {
                 showImportError = true
@@ -206,13 +190,11 @@ fun SettingsScreen(
         AlertDialog(
             onDismissRequest = { showImportError = false },
             title = { Text("Ошибка", fontSize = (20 * scale).sp) },
-            text = { Text("Не удалось прочитать файл.", fontSize = (15 * scale).sp) },
+            text = { Text("Не удалось прочитать файл. Возможно, он поврежден.", fontSize = (15 * scale).sp) },
             confirmButton = { TextButton(onClick = { showImportError = false }) { Text("ОК", fontSize = (15 * scale).sp) } }
         )
     }
 }
-
-// ── Вкладки ────────────────────────────────────────────────────
 
 @Composable
 private fun AppearanceTab(settings: AppSettings, scale: Float, update: ((AppSettings) -> AppSettings) -> Unit) {
@@ -231,13 +213,6 @@ private fun AppearanceTab(settings: AppSettings, scale: Float, update: ((AppSett
                 valueRange = 0.8f..1.5f, steps = 6,
                 modifier = Modifier.fillMaxWidth()
             )
-        }
-
-        item { SectionHeader("Дополнительно", scale) }
-        item {
-            SwitchRow("Анимации", "Плавные переходы", settings.animationsEnabled, scale) { v ->
-                update { it.copy(animationsEnabled = v) }
-            }
         }
     }
 }
@@ -269,6 +244,11 @@ private fun TimeTab(settings: AppSettings, scale: Float, update: ((AppSettings) 
         item {
             SwitchRow("Дата под часами", "Показывать дату", settings.showDateUnderClock, scale) { v ->
                 update { it.copy(showDateUnderClock = v) }
+            }
+        }
+        item {
+            SwitchRow("Часовой пояс", "Показывать название (Europe/Moscow)", settings.showTimezoneName, scale) { v ->
+                update { it.copy(showTimezoneName = v) }
             }
         }
     }
@@ -310,7 +290,7 @@ private fun DataTab(
     SettingsLazyList(scale) {
         item { SectionHeader("Резервная копия (.scs)", scale) }
         item {
-            Text("Сохраните настройки и будильники.", fontSize = (12 * scale).sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Сохраните настройки в один файл.", fontSize = (12 * scale).sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = onExport, modifier = Modifier.weight(1f)) {
@@ -337,8 +317,6 @@ private fun DataTab(
         }
     }
 }
-
-// ── Вспомогательные компоненты ─────────────────────────────────
 
 private data class SettingsTab(val title: String, val icon: ImageVector)
 
@@ -401,7 +379,6 @@ private fun TimePreviewCard(settings: AppSettings, scale: Float) {
     }
 }
 
-// ── Сериализация настроек ──────────────────────────────────────
 object SettingsSerializer {
     fun serialize(s: AppSettings): String = buildString {
         append("theme=${s.themeStyle.name};")
@@ -409,9 +386,9 @@ object SettingsSerializer {
         append("timeFmt=${s.timeFormat};")
         append("seconds=${s.showSeconds};")
         append("sort=${s.sortType.name};")
-        append("anim=${s.animationsEnabled};")
         append("date=${s.showDateUnderClock};")
-        append("hideEmpty=${s.hideEmptyRegions}")
+        append("hideEmpty=${s.hideEmptyRegions};")
+        append("tzName=${s.showTimezoneName}")
     }
 
     fun deserialize(text: String): AppSettings? {
@@ -430,9 +407,9 @@ object SettingsSerializer {
                 timeFormat = map["timeFmt"]?.toIntOrNull() ?: 24,
                 showSeconds = map["seconds"]?.toBooleanStrictOrNull() ?: true,
                 sortType = enumOr("sort", SortType.entries.toTypedArray(), AppSettings.DEFAULT.sortType),
-                animationsEnabled = map["anim"]?.toBooleanStrictOrNull() ?: true,
                 showDateUnderClock = map["date"]?.toBooleanStrictOrNull() ?: false,
-                hideEmptyRegions = map["hideEmpty"]?.toBooleanStrictOrNull() ?: true
+                hideEmptyRegions = map["hideEmpty"]?.toBooleanStrictOrNull() ?: true,
+                showTimezoneName = map["tzName"]?.toBooleanStrictOrNull() ?: false
             ).normalized()
         } catch (_: Exception) { null }
     }

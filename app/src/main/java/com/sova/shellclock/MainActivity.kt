@@ -121,7 +121,6 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            // Убрали Shapes, возвращаем стандартные скругления
             MaterialTheme(colorScheme = colorScheme) {
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
@@ -169,13 +168,17 @@ class MainActivity : ComponentActivity() {
                                 showSeconds = appSettings.showSeconds,
                                 use24HourFormat = appSettings.timeFormat == 24,
                                 sortType = appSettings.sortType.ordinal,
-                                hideEmptyRegions = appSettings.hideEmptyRegions
+                                hideEmptyRegions = appSettings.hideEmptyRegions,
+                                showTimezoneName = appSettings.showTimezoneName
                             )
                             Screen.Alarm -> AlarmScreen(scaleMultiplier = appSettings.sizeMultiplier)
                             Screen.Stopwatch -> StopwatchScreen()
                             Screen.Timer -> TimerScreen()
                             Screen.Description -> DescriptionScreen(appSettings.sizeMultiplier)
-                            Screen.Settings -> SettingsScreen(settings = appSettings, onSettingsChange = ::updateSettings)
+                            Screen.Settings -> SettingsScreen(
+                                settings = appSettings,
+                                onSettingsChange = ::updateSettings
+                            )
                         }
                     }
                 }
@@ -190,9 +193,9 @@ class MainActivity : ComponentActivity() {
             sizeMultiplier = prefs.getFloat("size_scale", 1.0f),
             showSeconds = prefs.getBoolean("show_seconds", true),
             timeFormat = prefs.getInt("time_format", 24),
-            animationsEnabled = prefs.getBoolean("animations", true),
             showDateUnderClock = prefs.getBoolean("show_date", false),
-            hideEmptyRegions = prefs.getBoolean("hide_empty", true)
+            hideEmptyRegions = prefs.getBoolean("hide_empty", true),
+            showTimezoneName = prefs.getBoolean("show_tz_name", false)
         )
     }
 
@@ -203,9 +206,9 @@ class MainActivity : ComponentActivity() {
             putFloat("size_scale", settings.sizeMultiplier)
             putBoolean("show_seconds", settings.showSeconds)
             putInt("time_format", settings.timeFormat)
-            putBoolean("animations", settings.animationsEnabled)
             putBoolean("show_date", settings.showDateUnderClock)
             putBoolean("hide_empty", settings.hideEmptyRegions)
+            putBoolean("show_tz_name", settings.showTimezoneName)
             apply()
         }
     }
