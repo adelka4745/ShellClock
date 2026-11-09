@@ -37,7 +37,10 @@ data class GitHubRelease(
 )
 
 @Composable
-fun DescriptionScreen(sizeMultiplier: Float) {
+fun DescriptionScreen(
+    sizeMultiplier: Float,
+    onBack: () -> Unit // <-- Кнопка назад
+) {
     val context = LocalContext.current
     var releases by remember { mutableStateOf<List<GitHubRelease>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
@@ -135,14 +138,19 @@ fun DescriptionScreen(sizeMultiplier: Float) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            // Заголовок с пасхалкой
-            Text(
-                text = "ShellClock",
-                fontSize = (32 * sizeMultiplier).sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.clickable { handleEasterEggClick() }
-            )
+            // --- ЗАГОЛОВОК С КНОПКОЙ НАЗАД И ПАСХАЛКОЙ ---
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
+                }
+                Text(
+                    text = "ShellClock",
+                    fontSize = (32 * sizeMultiplier).sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.clickable { handleEasterEggClick() }
+                )
+            }
         }
         item {
             Text(

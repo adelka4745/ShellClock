@@ -1,24 +1,16 @@
 package com.sova.shellclock
 
 import android.content.Context
-import android.os.Build
+import android.os.BatteryManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Alarm
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -26,26 +18,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sova.shellclock.ui.theme.ShellClockTheme
+import kotlinx.coroutines.delay
 
 enum class Screen(val label: String, val icon: ImageVector) {
-    Clock("Часы", Icons.Filled.Home),
-    World("Мир", Icons.Filled.List),
-    Alarm("Будильник", Icons.Filled.Alarm),
-    Stopwatch("Секундомер", Icons.Filled.PlayArrow),
-    Timer("Таймер", Icons.Filled.Build),
-    Description("Описание", Icons.Filled.Info),
-    Settings("Настройки", Icons.Filled.Settings)
+    Clock("Часы", Icons.Filled.Home), World("Мир", Icons.Filled.List), Alarm("Будильник", Icons.Filled.Alarm),
+    Stopwatch("Секундомер", Icons.Filled.PlayArrow), Timer("Таймер", Icons.Filled.Build)
 }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-
         val sharedPreferences = getSharedPreferences("shellclock_prefs", Context.MODE_PRIVATE)
 
         setContent {
@@ -53,132 +39,123 @@ class MainActivity : ComponentActivity() {
             var currentScreen by remember { mutableStateOf(Screen.Clock) }
             val context = LocalContext.current
 
+            var showSettings by remember { mutableStateOf(false) }
+            var showDescription by remember { mutableStateOf(false) }
+            var showDeveloperMode by remember { mutableStateOf(false) }
+
             fun updateSettings(newSettings: AppSettings) {
                 appSettings = newSettings
                 saveSettings(sharedPreferences, newSettings)
             }
 
-            val colorScheme = when (appSettings.themeStyle) {
-                ThemeStyle.LIGHT -> lightColorScheme()
-                ThemeStyle.MATERIAL_LIGHT -> lightColorScheme(
-                    primary = Color(0xFF6750A4), secondary = Color(0xFF625B71),
-                    background = Color(0xFFFEF7FF), surface = Color(0xFFFEF7FF)
-                )
-                ThemeStyle.CLASSIC_DARK -> darkColorScheme()
-                ThemeStyle.OLED_BLACK -> {
-                    val base = darkColorScheme()
-                    base.copy(background = Color.Black, surface = Color.Black, surfaceVariant = Color.Black)
+            // Уведомления о батарее
+            LaunchedEffect(Unit) {
+                val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+                var lastNotifiedLevel = -1
+                while (true) {
+                    val level = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                    val isCharging = batteryManager.isCharging
+
+                    if ((level == 15 && !isCharging && lastNotifiedLevel != 15) ||
+                        (level == 100 && isCharging && lastNotifiedLevel != 100)) {
+
+                        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                        val channelId = "battery_channel"
+
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                            val channel = android.app.NotificationChannel(channelId, "Батарея", android.app.NotificationManager.IMPORTANCE_DEFAULT)
+                            notificationManager.createNotificationChannel(channel)
+                        }
+
+                        val notification = androidx.core.app.NotificationCompat.Builder(context, channelId)
+                            .setContentTitle(if (level == 100) "Батарея заряжена" else "Низкий заряд")
+                            .setContentText(if (level == 100) "Уровень заряда достиг 100%" else "Уровень заряда упал до 15%")
+                            .setSmallIcon(android.R.drawable.ic_dialog_info)
+                            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_DEFAULT)
+                            .build()
+
+                        if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                            notificationManager.notify(1, notification)
+                        }
+                        lastNotifiedLevel = level
+                    }
+                    delay(60000L)
                 }
-                ThemeStyle.AUTO -> if (isSystemInDarkTheme()) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dynamicDarkColorScheme(context) else darkColorScheme()
-                } else {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dynamicLightColorScheme(context) else lightColorScheme()
-                }
-                ThemeStyle.AURORA -> darkColorScheme(
-                    primary = Color(0xFF4FC3F7), secondary = Color(0xFF81D4FA),
-                    background = Color(0xFF0B192C), surface = Color(0xFF1A365D),
-                    surfaceVariant = Color(0xFF2B4D7A), onPrimary = Color.Black, onBackground = Color.White, onSurface = Color.White
-                )
-                ThemeStyle.SUNSET -> darkColorScheme(
-                    primary = Color(0xFFFFB74D), secondary = Color(0xFFFF8A65),
-                    background = Color(0xFF2D1B0E), surface = Color(0xFF4A2E1B),
-                    surfaceVariant = Color(0xFF6B462E), onPrimary = Color.Black, onBackground = Color.White, onSurface = Color.White
-                )
-                ThemeStyle.NEON -> darkColorScheme(
-                    primary = Color(0xFFE040FB), secondary = Color(0xFF00E5FF),
-                    background = Color(0xFF12001A), surface = Color(0xFF260033),
-                    surfaceVariant = Color(0xFF3D0052), onPrimary = Color.Black, onBackground = Color(0xFFF3E5F5), onSurface = Color(0xFFF3E5F5)
-                )
-                ThemeStyle.FOREST -> darkColorScheme(
-                    primary = Color(0xFF81C784), secondary = Color(0xFFA5D6A7),
-                    background = Color(0xFF0F1A12), surface = Color(0xFF1B3323),
-                    surfaceVariant = Color(0xFF2E4D37), onPrimary = Color.Black, onBackground = Color(0xFFE8F5E9), onSurface = Color(0xFFE8F5E9)
-                )
-                ThemeStyle.ROSE -> darkColorScheme(
-                    primary = Color(0xFFFF80AB), secondary = Color(0xFFFF4081),
-                    background = Color(0xFF1F0F15), surface = Color(0xFF3B1A26),
-                    surfaceVariant = Color(0xFF572738), onPrimary = Color.Black, onBackground = Color(0xFFFFEBEE), onSurface = Color(0xFFFFEBEE)
-                )
-                ThemeStyle.MATERIAL_BLUE -> darkColorScheme(
-                    primary = Color(0xFF90CAF9), secondary = Color(0xFF64B5F6),
-                    background = Color(0xFF0D1B2A), surface = Color(0xFF1B263B),
-                    surfaceVariant = Color(0xFF2E3B55), onPrimary = Color.Black, onBackground = Color(0xFFE3F2FD), onSurface = Color(0xFFE3F2FD)
-                )
-                ThemeStyle.SEA_WAVE -> darkColorScheme(
-                    primary = Color(0xFF4DD0E1), secondary = Color(0xFF80DEEA),
-                    background = Color(0xFF001F24), surface = Color(0xFF00363D),
-                    surfaceVariant = Color(0xFF004F58), onPrimary = Color.Black, onBackground = Color.White, onSurface = Color.White
-                )
-                ThemeStyle.RETRO -> darkColorScheme(
-                    primary = Color(0xFFFFD54F), secondary = Color(0xFFFF8A80),
-                    background = Color(0xFF1A1010), surface = Color(0xFF2D1C1C),
-                    surfaceVariant = Color(0xFF4A2E2E), onPrimary = Color.Black, onBackground = Color.White, onSurface = Color.White
-                )
-                ThemeStyle.COSMOS -> darkColorScheme(
-                    primary = Color(0xFFB388FF), secondary = Color(0xFF82B1FF),
-                    background = Color(0xFF000000), surface = Color(0xFF1A0B2E),
-                    surfaceVariant = Color(0xFF2D1B4E), onPrimary = Color.Black, onBackground = Color.White, onSurface = Color.White
+            }
+
+            val customScheme = appSettings.customColor?.let { colorInt ->
+                val c = Color(colorInt)
+                MaterialTheme.colorScheme.copy(
+                    primary = c,
+                    secondary = c.copy(alpha = 0.7f),
+                    tertiary = c.copy(alpha = 0.5f)
                 )
             }
 
-            MaterialTheme(colorScheme = colorScheme) {
-                Scaffold(
-                    modifier = Modifier.fillMaxSize(),
-                    containerColor = MaterialTheme.colorScheme.background,
-                    bottomBar = {
-                        NavigationBar(modifier = Modifier.height(80.dp)) {
-                            Screen.entries.forEach { screen ->
-                                NavigationBarItem(
-                                    icon = {
-                                        Icon(
-                                            imageVector = screen.icon,
-                                            contentDescription = screen.label,
-                                            modifier = Modifier.size((20 * appSettings.sizeMultiplier).dp)
-                                        )
-                                    },
-                                    label = {
-                                        Text(
-                                            text = screen.label,
-                                            fontSize = (9 * appSettings.sizeMultiplier).sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    },
-                                    selected = currentScreen == screen,
-                                    alwaysShowLabel = true,
-                                    onClick = { currentScreen = screen },
-                                    colors = NavigationBarItemDefaults.colors(
-                                        selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                        selectedTextColor = MaterialTheme.colorScheme.onSurface,
-                                        indicatorColor = MaterialTheme.colorScheme.secondaryContainer
+            ShellClockTheme(themeStyle = appSettings.themeStyle, customColorScheme = customScheme) {
+                AnimatedContent(
+                    targetState = Triple(showSettings, showDescription, showDeveloperMode),
+                    transitionSpec = {
+                        (fadeIn(tween(300)) + slideInHorizontally(initialOffsetX = { it / 4 }))
+                            .togetherWith(fadeOut(tween(300)) + slideOutHorizontally(targetOffsetX = { -it / 4 }))
+                    }, label = "Menu"
+                ) { (isSettings, isDescription, isDevMode) ->
+                    if (isDevMode) {
+                        DeveloperModeScreen(settings = appSettings, onSettingsChange = ::updateSettings, onBack = { showDeveloperMode = false })
+                        return@AnimatedContent
+                    }
+                    if (isSettings) {
+                        SettingsScreen(settings = appSettings, onSettingsChange = ::updateSettings, onBack = { showSettings = false }, onOpenDeveloperMode = { showDeveloperMode = true })
+                        return@AnimatedContent
+                    }
+                    if (isDescription) {
+                        DescriptionScreen(sizeMultiplier = appSettings.sizeMultiplier, onBack = { showDescription = false })
+                        return@AnimatedContent
+                    }
+
+                    Scaffold(
+                        modifier = Modifier.fillMaxSize(),
+                        containerColor = MaterialTheme.colorScheme.background,
+                        bottomBar = {
+                            NavigationBar(modifier = Modifier.height(90.dp), containerColor = MaterialTheme.colorScheme.surfaceVariant) {
+                                Screen.entries.forEach { screen ->
+                                    NavigationBarItem(
+                                        icon = { Icon(screen.icon, screen.label, modifier = Modifier.size((28 * appSettings.sizeMultiplier).dp)) },
+                                        label = { Text(screen.label, fontSize = (12 * appSettings.sizeMultiplier).sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                        selected = currentScreen == screen, alwaysShowLabel = true, onClick = { currentScreen = screen },
+                                        colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer, selectedTextColor = MaterialTheme.colorScheme.onSurface, indicatorColor = MaterialTheme.colorScheme.secondaryContainer)
                                     )
-                                )
+                                }
                             }
                         }
-                    }
-                ) { innerPadding ->
-                    Surface(modifier = Modifier.padding(innerPadding), color = MaterialTheme.colorScheme.background) {
-                        when (currentScreen) {
-                            Screen.Clock -> ClockScreen(
-                                showSeconds = appSettings.showSeconds,
-                                use24HourFormat = appSettings.timeFormat == 24,
-                                showDate = appSettings.showDateUnderClock
-                            )
-                            Screen.World -> WorldClockScreen(
-                                showSeconds = appSettings.showSeconds,
-                                use24HourFormat = appSettings.timeFormat == 24,
-                                sortType = appSettings.sortType.ordinal,
-                                hideEmptyRegions = appSettings.hideEmptyRegions,
-                                showTimezoneName = appSettings.showTimezoneName
-                            )
-                            Screen.Alarm -> AlarmScreen(scaleMultiplier = appSettings.sizeMultiplier)
-                            Screen.Stopwatch -> StopwatchScreen()
-                            Screen.Timer -> TimerScreen()
-                            Screen.Description -> DescriptionScreen(appSettings.sizeMultiplier)
-                            Screen.Settings -> SettingsScreen(
-                                settings = appSettings,
-                                onSettingsChange = ::updateSettings
-                            )
+                    ) { innerPadding ->
+                        Surface(modifier = Modifier.padding(innerPadding), color = MaterialTheme.colorScheme.background) {
+                            AnimatedContent(targetState = currentScreen, transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(250)) }, label = "Screen") { targetScreen ->
+                                when (targetScreen) {
+                                    Screen.Clock -> ClockScreen(
+                                        settings = appSettings,
+                                        onOpenSettings = { showSettings = true },
+                                        onOpenDescription = { showDescription = true },
+                                        onOpenGitHub = {
+                                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/adelka4745/ShellClock"))
+                                            context.startActivity(intent)
+                                        }
+                                    )
+                                    Screen.World -> WorldClockScreen(
+                                        showSeconds = appSettings.showSeconds,
+                                        use24HourFormat = appSettings.timeFormat == 24,
+                                        sortType = appSettings.sortType.ordinal,
+                                        hideEmptyRegions = appSettings.hideEmptyRegions,
+                                        showTimezoneName = appSettings.showTimezoneName,
+                                        mainCityName = appSettings.mainCityName,
+                                        onMainCityChange = { cityName -> updateSettings(appSettings.copy(mainCityName = cityName)) }
+                                    )
+                                    Screen.Alarm -> AlarmScreen(scaleMultiplier = appSettings.sizeMultiplier)
+                                    Screen.Stopwatch -> StopwatchScreen()
+                                    Screen.Timer -> TimerScreen()
+                                    else -> {}
+                                }
+                            }
                         }
                     }
                 }
@@ -190,34 +167,25 @@ class MainActivity : ComponentActivity() {
         return AppSettings(
             themeStyle = ThemeStyle.entries.getOrElse(prefs.getInt("theme_style", 1)) { ThemeStyle.CLASSIC_DARK },
             sortType = SortType.entries.getOrElse(prefs.getInt("sort_type", 0)) { SortType.BY_NAME },
-            sizeMultiplier = prefs.getFloat("size_scale", 1.0f),
-            showSeconds = prefs.getBoolean("show_seconds", true),
-            timeFormat = prefs.getInt("time_format", 24),
-            showDateUnderClock = prefs.getBoolean("show_date", false),
-            hideEmptyRegions = prefs.getBoolean("hide_empty", true),
-            showTimezoneName = prefs.getBoolean("show_tz_name", false)
+            sizeMultiplier = prefs.getFloat("size_scale", 1.0f), showSeconds = prefs.getBoolean("show_seconds", true),
+            timeFormat = prefs.getInt("time_format", 24), showDateUnderClock = prefs.getBoolean("show_date", false),
+            hideEmptyRegions = prefs.getBoolean("hide_empty", true), showTimezoneName = prefs.getBoolean("show_tz_name", false),
+            isDeveloperMode = prefs.getBoolean("dev_mode", false),
+            customColor = if (prefs.contains("custom_color")) prefs.getInt("custom_color", -1) else null,
+            mainCityName = prefs.getString("main_city", null)
         )
     }
 
     private fun saveSettings(prefs: android.content.SharedPreferences, settings: AppSettings) {
         prefs.edit().apply {
-            putInt("theme_style", settings.themeStyle.ordinal)
-            putInt("sort_type", settings.sortType.ordinal)
-            putFloat("size_scale", settings.sizeMultiplier)
-            putBoolean("show_seconds", settings.showSeconds)
-            putInt("time_format", settings.timeFormat)
-            putBoolean("show_date", settings.showDateUnderClock)
-            putBoolean("hide_empty", settings.hideEmptyRegions)
-            putBoolean("show_tz_name", settings.showTimezoneName)
+            putInt("theme_style", settings.themeStyle.ordinal); putInt("sort_type", settings.sortType.ordinal)
+            putFloat("size_scale", settings.sizeMultiplier); putBoolean("show_seconds", settings.showSeconds)
+            putInt("time_format", settings.timeFormat); putBoolean("show_date", settings.showDateUnderClock)
+            putBoolean("hide_empty", settings.hideEmptyRegions); putBoolean("show_tz_name", settings.showTimezoneName)
+            putBoolean("dev_mode", settings.isDeveloperMode)
+            settings.customColor?.let { putInt("custom_color", it) } ?: remove("custom_color")
+            settings.mainCityName?.let { putString("main_city", it) } ?: remove("main_city")
             apply()
         }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun ClockPreview() {
-    ShellClockTheme {
-        ClockScreen(showSeconds = true, use24HourFormat = true)
     }
 }
