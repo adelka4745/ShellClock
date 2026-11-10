@@ -8,10 +8,7 @@ import android.os.BatteryManager
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,7 +17,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -29,6 +31,8 @@ fun ClockScreen(
     settings: AppSettings,
     onOpenSettings: () -> Unit,
     onOpenDescription: () -> Unit,
+    onOpenHelp: () -> Unit,
+    onOpenUtils: () -> Unit, // <-- НОВЫЙ ПАРАМЕТР
     onOpenGitHub: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -36,8 +40,44 @@ fun ClockScreen(
     val context = LocalContext.current
     var batteryLevel by remember { mutableIntStateOf(100) }
     var isCharging by remember { mutableStateOf(false) }
-
     var showMenu by remember { mutableStateOf(false) }
+
+    // Погода и Пинг
+    var weatherTemp by remember { mutableStateOf<String?>(null) }
+    var isOnline by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            isOnline = withContext(Dispatchers.IO) {
+                try {
+                    val url = URL("https://8.8.8.8")
+                    val connection = url.openConnection() as HttpURLConnection
+                    connection.connectTimeout = 2000
+                    connection.readTimeout = 2000
+                    connection.requestMethod = "HEAD"
+                    connection.responseCode == 200
+                } catch (e: Exception) { false }
+            }
+
+            if (isOnline && weatherTemp == null) {
+                weatherTemp = withContext(Dispatchers.IO) {
+                    try {
+                        val url = URL("https://api.open-meteo.com/v1/forecast?latitude=55.75&longitude=37.62&current_weather=true")
+                        val conn = url.openConnection() as HttpURLConnection
+                        conn.connectTimeout = 5000
+                        conn.readTimeout = 5000
+                        if (conn.responseCode == 200) {
+                            val response = conn.inputStream.bufferedReader().readText()
+                            val json = JSONObject(response)
+                            val current = json.getJSONObject("current_weather")
+                            "${current.getDouble("temperature")}°C"
+                        } else null
+                    } catch (e: Exception) { null }
+                }
+            }
+            delay(300_000L)
+        }
+    }
 
     DisposableEffect(Unit) {
         val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
@@ -48,7 +88,6 @@ fun ClockScreen(
                 val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
                 val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
                 if (level >= 0 && scale > 0) batteryLevel = (level * 100 / scale.toFloat()).toInt()
-
                 val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
                 isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
             }
@@ -82,13 +121,18 @@ fun ClockScreen(
             verticalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier.align(Alignment.Center)
         ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (!isOnline) Text("❌ Offline", color = MaterialTheme.colorScheme.error, fontSize = (14 * settings.sizeMultiplier).sp)
+                if (weatherTemp != null) Text("☀️ $weatherTemp", fontSize = (16 * settings.sizeMultiplier).sp, color = MaterialTheme.colorScheme.onSurface)
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+
             Text(text = digitsString, fontSize = (64 * settings.sizeMultiplier).sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, maxLines = 1)
             if (amPmString.isNotEmpty()) Text(text = amPmString, fontSize = (24 * settings.sizeMultiplier).sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.secondary)
             if (settings.showDateUnderClock) Text(text = dateString, fontSize = (18 * settings.sizeMultiplier).sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Прогресс-бар батареи
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 LinearProgressIndicator(
                     progress = animatedProgress,
@@ -108,7 +152,7 @@ fun ClockScreen(
             }
         }
 
-        // Меню с тремя точками (Настройки, Описание, GitHub)
+        // Меню с тремя точками (ДОБАВЛЕНЫ ПУНКТЫ)
         Box(modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
             IconButton(onClick = { showMenu = true }) {
                 Icon(Icons.Default.MoreVert, contentDescription = "Дополнительно", tint = MaterialTheme.colorScheme.onBackground)
@@ -116,14 +160,26 @@ fun ClockScreen(
 
             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                 DropdownMenuItem(
-                    text = { Text("Настройки") },
+                    text = { Text(tr("Настройки")) },
                     leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
                     onClick = { showMenu = false; onOpenSettings() }
                 )
                 DropdownMenuItem(
-                    text = { Text("Описание") },
+                    text = { Text(tr("Описание")) },
                     leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
                     onClick = { showMenu = false; onOpenDescription() }
+                )
+                // НОВЫЙ ПУНКТ: Утилиты
+                DropdownMenuItem(
+                    text = { Text(tr("Утилиты")) },
+                    leadingIcon = { Icon(Icons.Default.Build, contentDescription = null) },
+                    onClick = { showMenu = false; onOpenUtils() }
+                )
+                // НОВЫЙ ПУНКТ: Помощь
+                DropdownMenuItem(
+                    text = { Text(tr("Помощь")) },
+                    leadingIcon = { Icon(Icons.Default.HelpOutline, contentDescription = null) },
+                    onClick = { showMenu = false; onOpenHelp() }
                 )
                 DropdownMenuItem(
                     text = { Text("GitHub") },

@@ -3,6 +3,7 @@ package com.sova.shellclock
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.media.Ringtone
@@ -17,29 +18,35 @@ class AlarmService : Service() {
     override fun onCreate() {
         super.onCreate()
 
-        // Создаем канал уведомлений (нужно для работы Foreground Service на Android 8+)
         val channelId = "alarm_channel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId,
-                "Будильник",
+                "Alarm", // <-- Убрали tr(), просто строка
                 NotificationManager.IMPORTANCE_HIGH
             )
+            channel.setSound(null, null)
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
         }
 
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val notification: Notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Будильник")
-            .setContentText("Пора вставать!")
+            .setContentTitle("Time to wake up!") // <-- Убрали tr()
+            .setContentText("Tap to open app")    // <-- Убрали tr()
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setFullScreenIntent(pendingIntent, true)
+            .setOngoing(true)
             .build()
 
         startForeground(1, notification)
 
-        // Включаем звук
         val notificationUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
         ringtone = RingtoneManager.getRingtone(this, notificationUri)
         ringtone?.play()
@@ -51,7 +58,6 @@ class AlarmService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // Останавливаем звук, если сервис уничтожен
         ringtone?.stop()
     }
 

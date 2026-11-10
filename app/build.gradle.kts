@@ -14,7 +14,7 @@ android {
         minSdk = 26
         targetSdk = 37
         versionCode = 12
-        versionName = "5"
+        versionName = "6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -54,4 +54,10 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation("androidx.glance:glance-appwidget:1.1.0")
+    // Для запросов в интернет (погода, факты, курсы)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+// Для парсинга HTML (новости, гороскоп)
+    implementation("org.jsoup:jsoup:1.17.2")
+// Для QR-сканера
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 }

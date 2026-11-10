@@ -1,14 +1,26 @@
 package com.sova.shellclock
 
 enum class ThemeStyle(val label: String) {
-    LIGHT("Светлая"), CLASSIC_DARK("Классическая тёмная"), OLED_BLACK("Глубокая чёрная (OLED)"),
-    AUTO("Авто (по системе)"), AURORA("Северное сияние"), SUNSET("Закат"), NEON("Неон"),
-    FOREST("Лесная"), ROSE("Розовая"), MATERIAL_BLUE("Классический синий"), SEA_WAVE("Морская волна"),
-    RETRO("Ретро-неон"), COSMOS("Космос"), MATERIAL_LIGHT("Material Light")
+    LIGHT("Светлая"),
+    CLASSIC_DARK("Классическая тёмная"),
+    OLED_BLACK("Глубокая чёрная (OLED)"),
+    AUTO("Авто (по системе)"),
+    AURORA("Северное сияние"),
+    SUNSET("Закат"),
+    NEON("Неон"),
+    FOREST("Лесная"),
+    ROSE("Розовая"),
+    MATERIAL_BLUE("Классический синий"),
+    SEA_WAVE("Морская волна"),
+    RETRO("Ретро-неон"),
+    COSMOS("Космос"),
+    MATERIAL_LIGHT("Material Light")
 }
 
 enum class SortType(val label: String) {
-    BY_NAME("По названию городов (А-Я)"), BY_TIMEZONE("По названию часовых поясов"), BY_UTC_OFFSET("По смещению UTC")
+    BY_NAME("По названию городов (А-Я)"),
+    BY_TIMEZONE("По названию часовых поясов"),
+    BY_UTC_OFFSET("По смещению UTC")
 }
 
 data class AppSettings(
@@ -22,7 +34,8 @@ data class AppSettings(
     val showTimezoneName: Boolean = false,
     val isDeveloperMode: Boolean = false,
     val customColor: Int? = null,
-    val mainCityName: String? = null
+    val mainCityName: String? = null,
+    val appLanguage: String = "ru"
 ) {
     companion object {
         val DEFAULT = AppSettings()

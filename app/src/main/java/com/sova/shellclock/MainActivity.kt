@@ -1,7 +1,7 @@
 package com.sova.shellclock
 
 import android.content.Context
-import android.os.BatteryManager
+import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -10,6 +10,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,13 +23,28 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sova.shellclock.ui.theme.ShellClockTheme
 import kotlinx.coroutines.delay
+import java.util.Locale
 
 enum class Screen(val label: String, val icon: ImageVector) {
-    Clock("Часы", Icons.Filled.Home), World("Мир", Icons.Filled.List), Alarm("Будильник", Icons.Filled.Alarm),
-    Stopwatch("Секундомер", Icons.Filled.PlayArrow), Timer("Таймер", Icons.Filled.Build)
+    Clock("Часы", Icons.Filled.Home),
+    World("Мир", Icons.AutoMirrored.Filled.List),
+    Alarm("Будильник", Icons.Filled.Alarm),
+    Stopwatch("Секундомер", Icons.Filled.PlayArrow),
+    Timer("Таймер", Icons.Filled.Build)
 }
 
 class MainActivity : ComponentActivity() {
+
+    override fun attachBaseContext(newBase: Context) {
+        val prefs = newBase.getSharedPreferences("shellclock_prefs", Context.MODE_PRIVATE)
+        val lang = prefs.getString("app_language", "ru") ?: "ru"
+        val locale = Locale.forLanguageTag(lang)
+        Locale.setDefault(locale)
+        val config = Configuration(newBase.resources.configuration)
+        config.setLocale(locale)
+        super.attachBaseContext(newBase.createConfigurationContext(config))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -39,21 +55,30 @@ class MainActivity : ComponentActivity() {
             var currentScreen by remember { mutableStateOf(Screen.Clock) }
             val context = LocalContext.current
 
+            // Состояния навигации
             var showSettings by remember { mutableStateOf(false) }
             var showDescription by remember { mutableStateOf(false) }
             var showDeveloperMode by remember { mutableStateOf(false) }
+            var showHelp by remember { mutableStateOf(false) }
+            var showUtils by remember { mutableStateOf(false) }
 
             fun updateSettings(newSettings: AppSettings) {
-                appSettings = newSettings
-                saveSettings(sharedPreferences, newSettings)
+                if (newSettings.appLanguage != appSettings.appLanguage) {
+                    appSettings = newSettings
+                    saveSettings(sharedPreferences, newSettings)
+                    recreate()
+                } else {
+                    appSettings = newSettings
+                    saveSettings(sharedPreferences, newSettings)
+                }
             }
 
             // Уведомления о батарее
             LaunchedEffect(Unit) {
-                val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+                val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
                 var lastNotifiedLevel = -1
                 while (true) {
-                    val level = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                    val level = batteryManager.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
                     val isCharging = batteryManager.isCharging
 
                     if ((level == 15 && !isCharging && lastNotifiedLevel != 15) ||
@@ -63,13 +88,16 @@ class MainActivity : ComponentActivity() {
                         val channelId = "battery_channel"
 
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                            val channel = android.app.NotificationChannel(channelId, "Батарея", android.app.NotificationManager.IMPORTANCE_DEFAULT)
+                            val channel = android.app.NotificationChannel(channelId, "Battery", android.app.NotificationManager.IMPORTANCE_DEFAULT)
                             notificationManager.createNotificationChannel(channel)
                         }
 
+                        val title = if (level == 100) "Battery Charged" else "Low Battery"
+                        val text = if (level == 100) "Battery level reached 100%" else "Battery level dropped to 15%"
+
                         val notification = androidx.core.app.NotificationCompat.Builder(context, channelId)
-                            .setContentTitle(if (level == 100) "Батарея заряжена" else "Низкий заряд")
-                            .setContentText(if (level == 100) "Уровень заряда достиг 100%" else "Уровень заряда упал до 15%")
+                            .setContentTitle(title)
+                            .setContentText(text)
                             .setSmallIcon(android.R.drawable.ic_dialog_info)
                             .setPriority(androidx.core.app.NotificationCompat.PRIORITY_DEFAULT)
                             .build()
@@ -93,67 +121,71 @@ class MainActivity : ComponentActivity() {
             }
 
             ShellClockTheme(themeStyle = appSettings.themeStyle, customColorScheme = customScheme) {
-                AnimatedContent(
-                    targetState = Triple(showSettings, showDescription, showDeveloperMode),
-                    transitionSpec = {
-                        (fadeIn(tween(300)) + slideInHorizontally(initialOffsetX = { it / 4 }))
-                            .togetherWith(fadeOut(tween(300)) + slideOutHorizontally(targetOffsetX = { -it / 4 }))
-                    }, label = "Menu"
-                ) { (isSettings, isDescription, isDevMode) ->
-                    if (isDevMode) {
-                        DeveloperModeScreen(settings = appSettings, onSettingsChange = ::updateSettings, onBack = { showDeveloperMode = false })
-                        return@AnimatedContent
-                    }
-                    if (isSettings) {
-                        SettingsScreen(settings = appSettings, onSettingsChange = ::updateSettings, onBack = { showSettings = false }, onOpenDeveloperMode = { showDeveloperMode = true })
-                        return@AnimatedContent
-                    }
-                    if (isDescription) {
-                        DescriptionScreen(sizeMultiplier = appSettings.sizeMultiplier, onBack = { showDescription = false })
-                        return@AnimatedContent
-                    }
+                val currentOverlay = when {
+                    showDeveloperMode -> "dev"
+                    showSettings -> "settings"
+                    showDescription -> "description"
+                    showHelp -> "help"
+                    showUtils -> "utils"
+                    else -> null
+                }
 
-                    Scaffold(
-                        modifier = Modifier.fillMaxSize(),
-                        containerColor = MaterialTheme.colorScheme.background,
-                        bottomBar = {
-                            NavigationBar(modifier = Modifier.height(90.dp), containerColor = MaterialTheme.colorScheme.surfaceVariant) {
-                                Screen.entries.forEach { screen ->
-                                    NavigationBarItem(
-                                        icon = { Icon(screen.icon, screen.label, modifier = Modifier.size((28 * appSettings.sizeMultiplier).dp)) },
-                                        label = { Text(screen.label, fontSize = (12 * appSettings.sizeMultiplier).sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                        selected = currentScreen == screen, alwaysShowLabel = true, onClick = { currentScreen = screen },
-                                        colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer, selectedTextColor = MaterialTheme.colorScheme.onSurface, indicatorColor = MaterialTheme.colorScheme.secondaryContainer)
-                                    )
-                                }
-                            }
-                        }
-                    ) { innerPadding ->
-                        Surface(modifier = Modifier.padding(innerPadding), color = MaterialTheme.colorScheme.background) {
-                            AnimatedContent(targetState = currentScreen, transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(250)) }, label = "Screen") { targetScreen ->
-                                when (targetScreen) {
-                                    Screen.Clock -> ClockScreen(
-                                        settings = appSettings,
-                                        onOpenSettings = { showSettings = true },
-                                        onOpenDescription = { showDescription = true },
-                                        onOpenGitHub = {
-                                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/adelka4745/ShellClock"))
-                                            context.startActivity(intent)
+                AnimatedContent(targetState = currentOverlay, transitionSpec = {
+                    (fadeIn(tween(300)) + slideInHorizontally(initialOffsetX = { it / 4 }))
+                        .togetherWith(fadeOut(tween(300)) + slideOutHorizontally(targetOffsetX = { -it / 4 }))
+                }, label = "Menu") { overlay ->
+                    when (overlay) {
+                        "dev" -> DeveloperModeScreen(settings = appSettings, onSettingsChange = ::updateSettings, onBack = { showDeveloperMode = false })
+                        "settings" -> SettingsScreen(settings = appSettings, onSettingsChange = ::updateSettings, onBack = { showSettings = false }, onOpenDeveloperMode = { showDeveloperMode = true })
+                        "description" -> DescriptionScreen(sizeMultiplier = appSettings.sizeMultiplier, onBack = { showDescription = false })
+                        "help" -> HelpScreen(onBack = { showHelp = false })
+                        "utils" -> UtilsScreen(scaleMultiplier = appSettings.sizeMultiplier, onBack = { showUtils = false }) // <-- УПРОЩЕНО
+                        else -> {
+                            Scaffold(
+                                modifier = Modifier.fillMaxSize(),
+                                containerColor = MaterialTheme.colorScheme.background,
+                                bottomBar = {
+                                    NavigationBar(modifier = Modifier.height(90.dp), containerColor = MaterialTheme.colorScheme.surfaceVariant) {
+                                        Screen.entries.forEach { screen ->
+                                            NavigationBarItem(
+                                                icon = { Icon(screen.icon, screen.label, modifier = Modifier.size((28 * appSettings.sizeMultiplier).dp)) },
+                                                label = { Text(tr(screen.label), fontSize = (12 * appSettings.sizeMultiplier).sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                                selected = currentScreen == screen, alwaysShowLabel = true, onClick = { currentScreen = screen },
+                                                colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer, selectedTextColor = MaterialTheme.colorScheme.onSurface, indicatorColor = MaterialTheme.colorScheme.secondaryContainer)
+                                            )
                                         }
-                                    )
-                                    Screen.World -> WorldClockScreen(
-                                        showSeconds = appSettings.showSeconds,
-                                        use24HourFormat = appSettings.timeFormat == 24,
-                                        sortType = appSettings.sortType.ordinal,
-                                        hideEmptyRegions = appSettings.hideEmptyRegions,
-                                        showTimezoneName = appSettings.showTimezoneName,
-                                        mainCityName = appSettings.mainCityName,
-                                        onMainCityChange = { cityName -> updateSettings(appSettings.copy(mainCityName = cityName)) }
-                                    )
-                                    Screen.Alarm -> AlarmScreen(scaleMultiplier = appSettings.sizeMultiplier)
-                                    Screen.Stopwatch -> StopwatchScreen()
-                                    Screen.Timer -> TimerScreen()
-                                    else -> {}
+                                    }
+                                }
+                            ) { innerPadding ->
+                                Surface(modifier = Modifier.padding(innerPadding), color = MaterialTheme.colorScheme.background) {
+                                    AnimatedContent(targetState = currentScreen, transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(250)) }, label = "Screen") { targetScreen ->
+                                        when (targetScreen) {
+                                            Screen.Clock -> ClockScreen(
+                                                settings = appSettings,
+                                                onOpenSettings = { showSettings = true },
+                                                onOpenDescription = { showDescription = true },
+                                                onOpenHelp = { showHelp = true },
+                                                onOpenUtils = { showUtils = true },
+                                                onOpenGitHub = {
+                                                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/adelka4745/ShellClock"))
+                                                    context.startActivity(intent)
+                                                }
+                                            )
+                                            Screen.World -> WorldClockScreen(
+                                                showSeconds = appSettings.showSeconds,
+                                                use24HourFormat = appSettings.timeFormat == 24,
+                                                sortType = appSettings.sortType.ordinal,
+                                                hideEmptyRegions = appSettings.hideEmptyRegions,
+                                                showTimezoneName = appSettings.showTimezoneName,
+                                                mainCityName = appSettings.mainCityName,
+                                                onMainCityChange = { cityName -> updateSettings(appSettings.copy(mainCityName = cityName)) }
+                                            )
+                                            Screen.Alarm -> AlarmScreen(scaleMultiplier = appSettings.sizeMultiplier)
+                                            Screen.Stopwatch -> StopwatchScreen()
+                                            Screen.Timer -> TimerScreen()
+                                            else -> {}
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -172,7 +204,8 @@ class MainActivity : ComponentActivity() {
             hideEmptyRegions = prefs.getBoolean("hide_empty", true), showTimezoneName = prefs.getBoolean("show_tz_name", false),
             isDeveloperMode = prefs.getBoolean("dev_mode", false),
             customColor = if (prefs.contains("custom_color")) prefs.getInt("custom_color", -1) else null,
-            mainCityName = prefs.getString("main_city", null)
+            mainCityName = prefs.getString("main_city", null),
+            appLanguage = prefs.getString("app_language", "ru") ?: "ru"
         )
     }
 
@@ -185,6 +218,7 @@ class MainActivity : ComponentActivity() {
             putBoolean("dev_mode", settings.isDeveloperMode)
             settings.customColor?.let { putInt("custom_color", it) } ?: remove("custom_color")
             settings.mainCityName?.let { putString("main_city", it) } ?: remove("main_city")
+            putString("app_language", settings.appLanguage)
             apply()
         }
     }

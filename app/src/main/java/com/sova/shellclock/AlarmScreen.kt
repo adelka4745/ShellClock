@@ -41,42 +41,60 @@ fun AlarmScreen(scaleMultiplier: Float) {
     var alarms by remember { mutableStateOf(AlarmStorage.loadAlarms(context)) }
     var showPicker by remember { mutableStateOf(false) }
 
-    // --- Лаунчер для ЭКСПОРТА (Сохранение файла) ---
+    // Лаунчер для экспорта .sca
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/plain")
     ) { uri: Uri? ->
         uri?.let {
             try {
-                val text = AlarmStorage.serialize(alarms)
-                context.contentResolver.openOutputStream(it)?.use { stream ->
-                    stream.write(text.toByteArray())
+                val content = buildString {
+                    append("[SCA]\n")
+                    alarms.forEach { alarm ->
+                        append("ALARM: ${alarm.hour}:${alarm.minute}:${alarm.second}|${alarm.isEnabled}\n")
+                    }
                 }
-            } catch (e: Exception) {
-                // Ошибка записи
-            }
+                context.contentResolver.openOutputStream(it)?.use { stream ->
+                    stream.write(content.toByteArray())
+                }
+            } catch (e: Exception) { }
         }
     }
 
-    // --- Лаунчер для ИМПОРТА (Открытие файла) ---
+    // Лаунчер для импорта .sca
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let {
             try {
-                val text = context.contentResolver.openInputStream(it)?.bufferedReader()?.use { reader ->
+                val content = context.contentResolver.openInputStream(it)?.bufferedReader()?.use { reader ->
                     reader.readText()
                 } ?: ""
-                val importedAlarms = AlarmStorage.deserialize(text)
-
-                // Объединяем с текущими, чтобы не потерять старые
-                alarms = alarms + importedAlarms
-                AlarmStorage.saveAlarms(context, alarms)
-
-                // Перезапускаем будильники
-                importedAlarms.forEach { setAlarm(context, alarmManager, it) }
-            } catch (e: Exception) {
-                // Ошибка чтения
-            }
+                if (content.startsWith("[SCA]")) {
+                    val imported = content.lines()
+                        .filter { it.startsWith("ALARM: ") }
+                        .mapNotNull { line ->
+                            val clean = line.removePrefix("ALARM: ").trim()
+                            val parts = clean.split("|")
+                            if (parts.size == 2) {
+                                val timeParts = parts[0].split(":")
+                                if (timeParts.size == 3) {
+                                    AlarmItem(
+                                        id = (0..100000).random(),
+                                        hour = timeParts[0].toIntOrNull() ?: 0,
+                                        minute = timeParts[1].toIntOrNull() ?: 0,
+                                        second = timeParts[2].toIntOrNull() ?: 0,
+                                        isEnabled = parts[1].toBoolean()
+                                    )
+                                } else null
+                            } else null
+                        }
+                    if (imported.isNotEmpty()) {
+                        alarms = alarms + imported
+                        AlarmStorage.saveAlarms(context, alarms)
+                        imported.forEach { setSystemAlarm(context, alarmManager, it) }
+                    }
+                }
+            } catch (e: Exception) { }
         }
     }
 
@@ -84,16 +102,17 @@ fun AlarmScreen(scaleMultiplier: Float) {
         AlarmPickerDialog(
             scaleMultiplier = scaleMultiplier,
             onDismiss = { showPicker = false },
-            onTimeSelected = { hour, minute ->
+            onTimeSelected = { hour, minute, second ->
                 val newAlarm = AlarmItem(
                     id = (0..10000).random(),
                     hour = hour,
                     minute = minute,
+                    second = second,
                     isEnabled = true
                 )
                 alarms = alarms + newAlarm
                 AlarmStorage.saveAlarms(context, alarms)
-                setAlarm(context, alarmManager, newAlarm)
+                setSystemAlarm(context, alarmManager, newAlarm)
                 showPicker = false
             }
         )
@@ -104,7 +123,7 @@ fun AlarmScreen(scaleMultiplier: Float) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Будильник",
+            text = tr("Будильник"),
             fontSize = (28 * scaleMultiplier).sp,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(top = 24.dp, bottom = 16.dp)
@@ -112,7 +131,7 @@ fun AlarmScreen(scaleMultiplier: Float) {
 
         if (alarms.isEmpty()) {
             Text(
-                text = "Нет будильников",
+                text = tr("Нет будильников"),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = (16 * scaleMultiplier).sp,
                 modifier = Modifier.padding(top = 32.dp)
@@ -129,7 +148,7 @@ fun AlarmScreen(scaleMultiplier: Float) {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = String.format("%02d:%02d", alarm.hour, alarm.minute),
+                                text = String.format("%02d:%02d:%02d", alarm.hour, alarm.minute, alarm.second),
                                 fontSize = (32 * scaleMultiplier).sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary,
@@ -143,17 +162,17 @@ fun AlarmScreen(scaleMultiplier: Float) {
                                         if (it.id == alarm.id) it.copy(isEnabled = isChecked) else it
                                     }
                                     AlarmStorage.saveAlarms(context, alarms)
-                                    if (isChecked) setAlarm(context, alarmManager, alarm)
-                                    else cancelAlarm(context, alarmManager, alarm)
+                                    if (isChecked) setSystemAlarm(context, alarmManager, alarm)
+                                    else cancelSystemAlarm(context, alarmManager, alarm)
                                 }
                             )
 
                             IconButton(onClick = {
-                                cancelAlarm(context, alarmManager, alarm)
+                                cancelSystemAlarm(context, alarmManager, alarm)
                                 alarms = alarms.filter { it.id != alarm.id }
                                 AlarmStorage.saveAlarms(context, alarms)
                             }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Удалить")
+                                Icon(Icons.Default.Delete, contentDescription = tr("Удалить"))
                             }
                         }
                     }
@@ -168,10 +187,10 @@ fun AlarmScreen(scaleMultiplier: Float) {
         ) {
             Icon(Icons.Default.Add, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Добавить будильник", fontSize = (16 * scaleMultiplier).sp)
+            Text(tr("Добавить будильник"), fontSize = (16 * scaleMultiplier).sp)
         }
 
-        // Кнопки импорта и экспорта
+        // Экспорт/Импорт
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -196,157 +215,70 @@ fun AlarmScreen(scaleMultiplier: Float) {
     }
 }
 
-// ... (AlarmPickerDialog и WheelPicker остаются без изменений, они ниже в файле) ...
+// --- Функции для AlarmManager (вынесены, чтобы не дублировать) ---
+private fun setSystemAlarm(context: Context, alarmManager: AlarmManager, alarm: AlarmItem) {
+    if (!alarm.isEnabled) return
+    val calendar = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, alarm.hour)
+        set(Calendar.MINUTE, alarm.minute)
+        set(Calendar.SECOND, alarm.second)
+        if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_YEAR, 1)
+    }
+    val intent = Intent(context, AlarmReceiver::class.java).apply { putExtra("ALARM_ID", alarm.id) }
+    val pendingIntent = PendingIntent.getBroadcast(context, alarm.id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    val showIntent = PendingIntent.getActivity(context, alarm.id, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) alarmManager.setAlarmClock(AlarmManager.AlarmClockInfo(calendar.timeInMillis, showIntent), pendingIntent)
+        else alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingIntent)
+    } catch (e: SecurityException) { alarmManager.set(AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingIntent) }
+}
 
-// --- Экран с колёсиками ---
+private fun cancelSystemAlarm(context: Context, alarmManager: AlarmManager, alarm: AlarmItem) {
+    val intent = Intent(context, AlarmReceiver::class.java)
+    val pendingIntent = PendingIntent.getBroadcast(context, alarm.id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    alarmManager.cancel(pendingIntent)
+}
+
+// --- Диалог выбора времени ---
 @Composable
-fun AlarmPickerDialog(
-    scaleMultiplier: Float,
-    onDismiss: () -> Unit,
-    onTimeSelected: (Int, Int) -> Unit
-) {
+fun AlarmPickerDialog(scaleMultiplier: Float, onDismiss: () -> Unit, onTimeSelected: (Int, Int, Int) -> Unit) {
     var selectedHour by remember { mutableIntStateOf(Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) }
     var selectedMinute by remember { mutableIntStateOf(Calendar.getInstance().get(Calendar.MINUTE)) }
-
+    var selectedSecond by remember { mutableIntStateOf(Calendar.getInstance().get(Calendar.SECOND)) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Выберите время", fontSize = (20 * scaleMultiplier).sp) },
-        text = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Row(
-                    modifier = Modifier.height(150.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    WheelPicker(0..23, selectedHour, { selectedHour = it }, "ЧЧ")
-                    Text(":", fontSize = (40 * scaleMultiplier).sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    WheelPicker(0..59, selectedMinute, { selectedMinute = it }, "ММ")
-                }
+        title = { Text(tr("Выберите время"), fontSize = (20 * scaleMultiplier).sp) },
+        text = { Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(modifier = Modifier.height(150.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                AlarmWheelPicker(0..23, selectedHour, { selectedHour = it }, "ЧЧ")
+                Text(":", fontSize = (40 * scaleMultiplier).sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                AlarmWheelPicker(0..59, selectedMinute, { selectedMinute = it }, "ММ")
+                Text(":", fontSize = (40 * scaleMultiplier).sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                AlarmWheelPicker(0..59, selectedSecond, { selectedSecond = it }, "СС")
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onTimeSelected(selectedHour, selectedMinute) }) {
-                Text("Готово", fontSize = (16 * scaleMultiplier).sp)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Отмена", fontSize = (16 * scaleMultiplier).sp)
-            }
-        }
+        } },
+        confirmButton = { TextButton(onClick = { onTimeSelected(selectedHour, selectedMinute, selectedSecond) }) { Text(tr("Готово"), fontSize = (16 * scaleMultiplier).sp) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(tr("Отмена"), fontSize = (16 * scaleMultiplier).sp) } }
     )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun WheelPicker(
-    range: IntRange,
-    value: Int,
-    onValueChange: (Int) -> Unit,
-    label: String
-) {
-    val items = range.toList()
-    val itemHeight = 50.dp
-    val height = itemHeight * 3
-
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = value)
-    val coroutineScope = rememberCoroutineScope()
-
-    LaunchedEffect(value) {
-        if (listState.firstVisibleItemIndex != value) {
-            listState.animateScrollToItem(value)
-        }
-    }
-
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (!listState.isScrollInProgress) {
-            onValueChange(items[listState.firstVisibleItemIndex])
-        }
-    }
-
-    Box(
-        modifier = Modifier.width(80.dp).height(height),
-        contentAlignment = Alignment.Center
-    ) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(vertical = itemHeight)
-        ) {
+fun AlarmWheelPicker(range: IntRange, value: Int, onValueChange: (Int) -> Unit, label: String) {
+    val items = range.toList(); val itemHeight = 50.dp; val height = itemHeight * 3
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = value); val coroutineScope = rememberCoroutineScope()
+    LaunchedEffect(value) { if (listState.firstVisibleItemIndex != value) listState.animateScrollToItem(value) }
+    LaunchedEffect(listState.isScrollInProgress) { if (!listState.isScrollInProgress) onValueChange(items[listState.firstVisibleItemIndex]) }
+    Box(modifier = Modifier.width(80.dp).height(height), contentAlignment = Alignment.Center) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = itemHeight)) {
             items(items.size) { index ->
                 val isSelected = index == listState.firstVisibleItemIndex
-                Box(
-                    modifier = Modifier.fillMaxWidth().height(itemHeight).clickable {
-                        coroutineScope.launch { listState.animateScrollToItem(index) }
-                    },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = String.format("%02d", items[index]),
-                        fontSize = if (isSelected) 40.sp else 28.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                    )
+                Box(modifier = Modifier.fillMaxWidth().height(itemHeight).clickable { coroutineScope.launch { listState.animateScrollToItem(index) } }, contentAlignment = Alignment.Center) {
+                    Text(String.format("%02d", items[index]), fontSize = if (isSelected) 40.sp else 28.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
                 }
             }
         }
-        Box(
-            modifier = Modifier.fillMaxWidth().height(itemHeight).align(Alignment.TopCenter)
-                .background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.surface, Color.Transparent)))
-        )
-        Box(
-            modifier = Modifier.fillMaxWidth().height(itemHeight).align(Alignment.BottomCenter)
-                .background(Brush.verticalGradient(listOf(Color.Transparent, MaterialTheme.colorScheme.surface)))
-        )
+        Box(modifier = Modifier.fillMaxWidth().height(itemHeight).align(Alignment.TopCenter).background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.background, Color.Transparent))))
+        Box(modifier = Modifier.fillMaxWidth().height(itemHeight).align(Alignment.BottomCenter).background(Brush.verticalGradient(listOf(Color.Transparent, MaterialTheme.colorScheme.background))))
     }
-}
-
-// --- Вспомогательные функции для системного будильника ---
-private fun setAlarm(context: Context, alarmManager: AlarmManager, alarm: AlarmItem) {
-    val calendar = Calendar.getInstance().apply {
-        set(Calendar.HOUR_OF_DAY, alarm.hour)
-        set(Calendar.MINUTE, alarm.minute)
-        set(Calendar.SECOND, 0)
-        if (timeInMillis <= System.currentTimeMillis()) {
-            add(Calendar.DAY_OF_YEAR, 1)
-        }
-    }
-
-    val intent = Intent(context, AlarmReceiver::class.java).apply {
-        putExtra("ALARM_ID", alarm.id)
-    }
-
-    val pendingIntent = PendingIntent.getBroadcast(
-        context, alarm.id, intent,
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
-
-    val showIntent = PendingIntent.getActivity(
-        context, alarm.id, Intent(context, MainActivity::class.java),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
-
-    try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            alarmManager.setAlarmClock(
-                AlarmManager.AlarmClockInfo(calendar.timeInMillis, showIntent),
-                pendingIntent
-            )
-        } else {
-            alarmManager.setExactAndAllowWhileIdle(
-                AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingIntent
-            )
-        }
-    } catch (e: SecurityException) {
-        alarmManager.set(AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingIntent)
-    }
-}
-
-private fun cancelAlarm(context: Context, alarmManager: AlarmManager, alarm: AlarmItem) {
-    val intent = Intent(context, AlarmReceiver::class.java)
-    val pendingIntent = PendingIntent.getBroadcast(
-        context, alarm.id, intent,
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
-    alarmManager.cancel(pendingIntent)
 }
