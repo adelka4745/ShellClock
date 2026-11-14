@@ -35,7 +35,9 @@ data class AppSettings(
     val isDeveloperMode: Boolean = false,
     val customColor: Int? = null,
     val mainCityName: String? = null,
-    val appLanguage: String = "ru"
+    val appLanguage: String = "ru",
+    // Идентификатор часового пояса, например "Europe/Moscow"; null — системный
+    val timeZoneId: String? = null
 ) {
     companion object {
         val DEFAULT = AppSettings()

@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -51,18 +52,27 @@ fun TimerScreen() {
 
     val totalTime = (hours * 3600 + minutes * 60 + seconds).toLong()
 
-    LaunchedEffect(isRunning, totalTime) {
-        if (isRunning && totalTime > 0) {
-            delay(1000L)
-            if (seconds > 0) seconds--
-            else if (minutes > 0) { minutes--; seconds = 59 }
-            else if (hours > 0) { hours--; minutes = 59; seconds = 59 }
+    // Монотонные часы окончания: тикать от них — единственный способ не накапливать отставание,
+    // потому что LaunchedEffect/Compose притормаживают в фоне
+    var deadline by remember { mutableLongStateOf(0L) }
+    var remainingSeconds by remember { mutableIntStateOf(-1) }
 
-            if (hours == 0 && minutes == 0 && seconds == 0) {
-                isRunning = false
-            }
+    LaunchedEffect(isRunning, deadline) {
+        if (!isRunning || deadline == 0L) return@LaunchedEffect
+        while (true) {
+            val leftMillis = deadline - SystemClock.elapsedRealtime()
+            if (leftMillis <= 0) break
+            remainingSeconds = ((leftMillis + 999) / 1000).toInt()
+            delay(minOf(leftMillis, 1000L))
         }
+        remainingSeconds = 0
+        isRunning = false
     }
+
+    // Пока таймер идёт, экран показывает реальный остаток, а не исходную установку
+    val shownHours = if (remainingSeconds >= 0) remainingSeconds / 3600 else hours
+    val shownMinutes = if (remainingSeconds >= 0) (remainingSeconds % 3600) / 60 else minutes
+    val shownSeconds = if (remainingSeconds >= 0) remainingSeconds % 60 else seconds
 
     fun startTimerService() {
         val intent = Intent(context, TimerForeground::class.java).apply {
@@ -87,20 +97,24 @@ fun TimerScreen() {
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            WheelPicker(0..23, hours, { hours = it }, "ЧЧ", !isRunning)
+            WheelPicker(0..23, shownHours, { hours = it }, "ЧЧ", !isRunning)
             Text(":", fontSize = 40.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            WheelPicker(0..59, minutes, { minutes = it }, "ММ", !isRunning)
+            WheelPicker(0..59, shownMinutes, { minutes = it }, "ММ", !isRunning)
             Text(":", fontSize = 40.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            WheelPicker(0..59, seconds, { seconds = it }, "СС", !isRunning)
+            WheelPicker(0..59, shownSeconds, { seconds = it }, "СС", !isRunning)
         }
 
         Row(modifier = Modifier.padding(top = 32.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Button(onClick = {
                 if (!isRunning) {
+                    if (totalTime <= 0) return@Button
+                    remainingSeconds = totalTime.toInt()
+                    deadline = SystemClock.elapsedRealtime() + totalTime * 1000L
                     startTimerService()
                     isRunning = true
                 } else {
                     isRunning = false
+                    remainingSeconds = -1
                     stopTimerService()
                 }
             }) {
@@ -108,6 +122,7 @@ fun TimerScreen() {
             }
             Button(onClick = {
                 isRunning = false
+                remainingSeconds = -1
                 stopTimerService()
                 hours = 0; minutes = 1; seconds = 0
             }) {
@@ -117,7 +132,10 @@ fun TimerScreen() {
 
         FlowRow(modifier = Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { if (minutes < 59) minutes += 1 }, enabled = !isRunning) { Text("+1 м") }
-            Button(onClick = { if (minutes > 0) minutes -= 1 }, enabled = !isRunning) { Text("-1 м") }
+            // Без заимствования из часов минуты уходили в отрицательные
+            Button(onClick = {
+                if (minutes > 0) minutes -= 1 else if (hours > 0) { hours--; minutes += 59 }
+            }, enabled = !isRunning) { Text("-1 м") }
             Button(onClick = { if (seconds <= 30) seconds += 30 else { minutes++; seconds -= 30 } }, enabled = !isRunning) { Text("+30 с") }
             Button(onClick = { if (seconds >= 30) seconds -= 30 else if (minutes > 0) { minutes--; seconds += 30 } }, enabled = !isRunning) { Text("-30 с") }
             Button(onClick = { if (minutes <= 54) minutes += 5 else { hours++; minutes -= 55 } }, enabled = !isRunning) { Text("+5 м") }

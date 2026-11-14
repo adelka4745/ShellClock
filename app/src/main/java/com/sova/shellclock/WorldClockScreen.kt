@@ -21,23 +21,11 @@ import java.util.*
 
 data class CityTime(val name: String, val timezone: String, val region: String)
 
-@Composable
-fun WorldClockScreen(
-    showSeconds: Boolean,
-    use24HourFormat: Boolean,
-    sortType: Int,
-    hideEmptyRegions: Boolean = true,
-    showTimezoneName: Boolean = false,
-    mainCityName: String? = null,
-    onMainCityChange: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    val prefs = remember { context.getSharedPreferences("shellclock_prefs", android.content.Context.MODE_PRIVATE) }
-
-    val cities = remember {
-        listOf(
-            CityTime("Лондон", "Europe/London", "Европа"), CityTime("Париж", "Europe/Paris", "Европа"),
+/**
+ * Часовой пояс города по названию — нужен настройкам и AI, а не только экрану «Мир»
+ */
+val citiesList: List<CityTime> = listOf(
+    CityTime("Лондон", "Europe/London", "Европа"), CityTime("Париж", "Europe/Paris", "Европа"),
             CityTime("Берлин", "Europe/Berlin", "Европа"), CityTime("Рим", "Europe/Rome", "Европа"),
             CityTime("Мадрид", "Europe/Madrid", "Европа"), CityTime("Амстердам", "Europe/Amsterdam", "Европа"),
             CityTime("Афины", "Europe/Athens", "Европа"), CityTime("Москва", "Europe/Moscow", "Европа"),
@@ -103,8 +91,23 @@ fun WorldClockScreen(
             CityTime("Аделаида", "Australia/Cen. Australia", "Австралия и Океания"), CityTime("Веллингтон", "Pacific/Auckland", "Австралия и Океания"),
             CityTime("Хобарт", "Australia/Hobart", "Австралия и Океания"), CityTime("Дарвин", "Australia/Darwin", "Австралия и Океания"),
             CityTime("Порт-Морсби", "Pacific/Port_Moresby", "Австралия и Океания")
-        )
-    }
+)
+
+@Composable
+fun WorldClockScreen(
+    showSeconds: Boolean,
+    use24HourFormat: Boolean,
+    sortType: Int,
+    hideEmptyRegions: Boolean = true,
+    showTimezoneName: Boolean = false,
+    mainCityName: String? = null,
+    timeZoneId: String? = null,
+    onMainCityChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("shellclock_prefs", android.content.Context.MODE_PRIVATE) }
+    val cities = citiesList
 
     var favorites by remember { mutableStateOf(prefs.getStringSet("favorites", emptySet())?.toSet() ?: emptySet()) }
     var searchQuery by remember { mutableStateOf("") }
@@ -130,6 +133,14 @@ fun WorldClockScreen(
     val timePattern = if (use24HourFormat) "HH:mm" else "hh:mm a"
     val timeLocale = if (use24HourFormat) Locale.getDefault() else Locale.US
 
+    // Отмеченный город задаёт ваш часовой пояс: иначе все города сравнивались с системным.
+    // Явно выбранный пояс в настройках важнее главного города.
+    val myTimeZone = remember(mainCityName, timeZoneId) {
+        val zoneId = timeZoneId ?: cities.firstOrNull { it.name == mainCityName }?.timezone
+        if (zoneId != null) TimeZone.getTimeZone(zoneId) else TimeZone.getDefault()
+    }
+    val myCityName = mainCityName ?: timeZoneId?.substringAfterLast('/') ?: "системный"
+
     val filteredCities = remember(selectedTabIndex, sortType, regions, currentTime, searchQuery, favorites, mainCityName) {
         val regionCities = if (selectedTabIndex == 0) cities.filter { favorites.contains(it.name) }
         else if (selectedTabIndex - 1 in baseRegions.indices) cities.filter { it.region == baseRegions[selectedTabIndex - 1] }
@@ -149,6 +160,17 @@ fun WorldClockScreen(
 
     Column(modifier = modifier.fillMaxSize()) {
         Text("Мировое время", fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp))
+
+        // Подпись пояса без символа «GMT+» и с названием города — понятно, откуда сравниваются часы
+        val myOffset = myTimeZone.getOffset(currentTime) / 60000
+        val myOffsetSign = if (myOffset >= 0) "+" else "-"
+        val myOffsetText = "UTC%s%02d:%02d".format(myOffsetSign, Math.abs(myOffset) / 60, Math.abs(myOffset) % 60)
+        Text(
+            "Ваш пояс: $myCityName · $myOffsetText",
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp)
+        )
 
         OutlinedTextField(
             value = searchQuery, onValueChange = { searchQuery = it },
@@ -192,6 +214,14 @@ fun WorldClockScreen(
                             Text(city.timezone, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Text(sdf.format(Date(currentTime)), fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
+                        // Разница с вашим поясом: «+2 ч к вашему» или «-30 мин к вашему»
+                        val diffMinutes = (TimeZone.getTimeZone(city.timezone).getOffset(currentTime) - myTimeZone.getOffset(currentTime)) / 60000
+                        if (!isMain && diffMinutes != 0) {
+                            val sign = if (diffMinutes > 0) "+" else "−"
+                            val absMinutes = Math.abs(diffMinutes)
+                            val diffText = if (absMinutes % 60 == 0) "${absMinutes / 60} ч" else "${absMinutes} мин"
+                            Text("$sign$diffText к вашему", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
                 HorizontalDivider()

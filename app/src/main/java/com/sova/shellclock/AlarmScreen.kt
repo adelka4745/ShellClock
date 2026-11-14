@@ -41,6 +41,10 @@ fun AlarmScreen(scaleMultiplier: Float) {
     var alarms by remember { mutableStateOf(AlarmStorage.loadAlarms(context)) }
     var showPicker by remember { mutableStateOf(false) }
 
+    LaunchedEffect(Unit) {
+        alarms = AlarmStorage.loadAlarms(context)
+    }
+
     // Лаунчер для экспорта .sca
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/plain")
@@ -69,8 +73,10 @@ fun AlarmScreen(scaleMultiplier: Float) {
                 val content = context.contentResolver.openInputStream(it)?.bufferedReader()?.use { reader ->
                     reader.readText()
                 } ?: ""
-                if (content.startsWith("[SCA]")) {
-                    val imported = content.lines()
+                // Файл мог быть перенесён на Windows с CRLF — тогда разделители не находятся
+                val normalized = content.replace("\r\n", "\n")
+                if (normalized.startsWith("[SCA]")) {
+                    val imported = normalized.lines()
                         .filter { it.startsWith("ALARM: ") }
                         .mapNotNull { line ->
                             val clean = line.removePrefix("ALARM: ").trim()
@@ -78,11 +84,16 @@ fun AlarmScreen(scaleMultiplier: Float) {
                             if (parts.size == 2) {
                                 val timeParts = parts[0].split(":")
                                 if (timeParts.size == 3) {
+                                    val hour = timeParts[0].toIntOrNull() ?: return@mapNotNull null
+                                    val minute = timeParts[1].toIntOrNull() ?: return@mapNotNull null
+                                    val second = timeParts[2].toIntOrNull() ?: return@mapNotNull null
+                                    // Невалидное время давало будильник, который никогда не сработает
+                                    if (hour !in 0..23 || minute !in 0..59 || second !in 0..59) return@mapNotNull null
                                     AlarmItem(
                                         id = (0..100000).random(),
-                                        hour = timeParts[0].toIntOrNull() ?: 0,
-                                        minute = timeParts[1].toIntOrNull() ?: 0,
-                                        second = timeParts[2].toIntOrNull() ?: 0,
+                                        hour = hour,
+                                        minute = minute,
+                                        second = second,
                                         isEnabled = parts[1].toBoolean()
                                     )
                                 } else null
@@ -215,13 +226,28 @@ fun AlarmScreen(scaleMultiplier: Float) {
     }
 }
 
+fun addAlarm(context: Context, hour: Int, minute: Int, second: Int) {
+    val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+    val alarm = AlarmItem(
+        id = (0..10000).random(),
+        hour = hour,
+        minute = minute,
+        second = second,
+        isEnabled = true
+    )
+    val alarms = AlarmStorage.loadAlarms(context) + alarm
+    AlarmStorage.saveAlarms(context, alarms)
+    setSystemAlarm(context, alarmManager, alarm)
+}
+
 // --- Функции для AlarmManager (вынесены, чтобы не дублировать) ---
-private fun setSystemAlarm(context: Context, alarmManager: AlarmManager, alarm: AlarmItem) {
+fun setSystemAlarm(context: Context, alarmManager: AlarmManager, alarm: AlarmItem) {
     if (!alarm.isEnabled) return
     val calendar = Calendar.getInstance().apply {
         set(Calendar.HOUR_OF_DAY, alarm.hour)
         set(Calendar.MINUTE, alarm.minute)
         set(Calendar.SECOND, alarm.second)
+        set(Calendar.MILLISECOND, 0)
         if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_YEAR, 1)
     }
     val intent = Intent(context, AlarmReceiver::class.java).apply { putExtra("ALARM_ID", alarm.id) }
@@ -233,7 +259,7 @@ private fun setSystemAlarm(context: Context, alarmManager: AlarmManager, alarm: 
     } catch (e: SecurityException) { alarmManager.set(AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingIntent) }
 }
 
-private fun cancelSystemAlarm(context: Context, alarmManager: AlarmManager, alarm: AlarmItem) {
+fun cancelSystemAlarm(context: Context, alarmManager: AlarmManager, alarm: AlarmItem) {
     val intent = Intent(context, AlarmReceiver::class.java)
     val pendingIntent = PendingIntent.getBroadcast(context, alarm.id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     alarmManager.cancel(pendingIntent)
